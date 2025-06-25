@@ -335,10 +335,13 @@
                     );
                     
                     let distanceText = '';
-                    if (distance < 1000) {
-                        distanceText = `${Math.round(distance)} meters`;
+                    const distanceInFeet = distance * 3.28084;
+                    const distanceInMiles = distance * 0.000621371;
+                    
+                    if (distanceInFeet < 528) { // Less than 0.1 miles (528 feet)
+                        distanceText = `${Math.round(distanceInFeet)} feet`;
                     } else {
-                        distanceText = `${(distance / 1000).toFixed(1)} km`;
+                        distanceText = `${distanceInMiles.toFixed(1)} miles`;
                     }
                     
                     let statusIcon = '';
