@@ -258,13 +258,14 @@
         <div id="status" class="status" style="display: none;"></div>
         
         <div id="nearbyStores" class="nearby-stores" style="display: none;">
-            <h3>🏪 Nearby Stores (5 miles)</h3>
+            <h3>🏪 Check In to a Store (5 miles)</h3>
             <div id="storeList" class="store-list"></div>
         </div>
         
         <div class="footer">
             <p>🔒 Your location is only shared with your Discord server and not stored anywhere.</p>
             <p>📱 Click "Allow" when your browser asks for location permission.</p>
+            <p>🏪 After allowing location, click on a store to check in to that location.</p>
             <div class="powered-by">
                 Powered by Location Bot • Real-time tracking
             </div>
@@ -456,8 +457,7 @@
                 const storeElement = document.createElement('div');
                 storeElement.className = 'store-item';
                 storeElement.onclick = () => {
-                    const mapsUrl = `https://maps.google.com/maps?q=${store.lat},${store.lng}`;
-                    window.open(mapsUrl, '_blank');
+                    selectStore(store);
                 };
                 
                 storeElement.innerHTML = `
@@ -466,7 +466,7 @@
                         <div class="store-name">${store.name}</div>
                         <div class="store-distance ${distanceClass}">${distance.toFixed(1)} mi</div>
                     </div>
-                    <div class="store-info">${description}</div>
+                    <div class="store-info">${description} • Click to check in</div>
                     <div class="store-address">${store.address}</div>
                 `;
                 
@@ -492,10 +492,51 @@
             statusDiv.style.display = 'block';
         }
 
+        function selectStore(store) {
+            showStatus('📍 Checking you in to ' + store.name + '...', 'info');
+            
+            // Post the store's exact location to Discord
+            postLocationToDiscord({
+                latitude: store.lat,
+                longitude: store.lng,
+                accuracy: 10, // High accuracy since it's a selected store
+                selectedStore: store.name,
+                isManualCheckIn: true
+            });
+        }
+
         function postLocationToDiscord(location) {
-            // This would normally post to Discord via webhook
-            // For demo purposes, we'll just show success
-            showStatus('✅ Location shared successfully with your team!', 'success');
+            // In real implementation, this would post to Discord webhook
+            // For now, we'll simulate the success and redirect
+            
+            setTimeout(() => {
+                if (location.selectedStore) {
+                    showStatus('✅ Successfully checked in to ' + location.selectedStore + '!', 'success');
+                } else {
+                    showStatus('✅ Location shared successfully with your team!', 'success');
+                }
+                
+                // Redirect back to Discord after 2 seconds
+                setTimeout(() => {
+                    showStatus('🔄 Redirecting back to Discord...', 'info');
+                    
+                    // Try different methods to return to Discord
+                    setTimeout(() => {
+                        // Try to close the window/tab (works if opened from Discord)
+                        try {
+                            window.close();
+                        } catch (e) {
+                            // If that fails, try Discord app URL
+                            window.location.href = 'discord://';
+                            
+                            // Fallback: show manual instruction
+                            setTimeout(() => {
+                                showStatus('✅ Check-in complete! You can now return to Discord.', 'success');
+                            }, 1000);
+                        }
+                    }, 500);
+                }, 2000);
+            }, 1000);
         }
 
         document.getElementById('shareLocationBtn').addEventListener('click', function() {
