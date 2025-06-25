@@ -2,6 +2,13 @@ import discord
 from discord.ext import commands
 import os
 import math
+import asyncio
+from flask import Flask, request, jsonify
+from threading import Thread
+import json
+
+# Flask app for webhook
+app = Flask(__name__)
 
 # Bot setup
 intents = discord.Intents.default()
@@ -208,6 +215,9 @@ def get_status_indicator(distance):
     else:  # Far
         return "🔴", "FAR"
 
+# Store the channel ID for location updates
+LOCATION_CHANNEL_ID = None
+
 @bot.event
 async def on_ready():
     print(f'✅ {bot.user} has connected to Discord!')
@@ -226,6 +236,8 @@ async def ping(interaction: discord.Interaction):
 @bot.tree.command(name="location", description="Share your location with the team")
 async def location(interaction: discord.Interaction):
     """Enhanced location sharing command with beautiful embeds"""
+    global LOCATION_CHANNEL_ID
+    LOCATION_CHANNEL_ID = interaction.channel.id  # Store the channel ID
     
     # Create beautiful embed for location sharing
     branding = get_store_branding("location")
@@ -236,10 +248,13 @@ async def location(interaction: discord.Interaction):
         color=branding['color']
     )
     
+    # Get your website URL - replace with your actual URL
+    website_url = "https://ibrahimansoor.github.io/location-bot"
+    
     # Add location link with better formatting
     embed.add_field(
         name="🔗 Location Link",
-        value="[Click here to share location](https://ibrahimansoor.github.io/location-bot)",
+        value=f"[Click here to share location]({website_url})",
         inline=False
     )
     
@@ -309,11 +324,18 @@ async def stores_command(interaction: discord.Interaction, latitude: float, long
     
     await interaction.response.send_message(embed=embed)
 
-# Enhanced location posting function (called from website)
-async def post_location_update(channel_id, user_location):
+# Enhanced location posting function (called from webhook)
+async def post_location_update(user_location):
     """Post beautiful location update to Discord"""
-    channel = bot.get_channel(int(channel_id))
+    global LOCATION_CHANNEL_ID
+    
+    if not LOCATION_CHANNEL_ID:
+        print("❌ No channel ID set for location updates")
+        return
+        
+    channel = bot.get_channel(LOCATION_CHANNEL_ID)
     if not channel:
+        print(f"❌ Could not find channel with ID {LOCATION_CHANNEL_ID}")
         return
     
     try:
@@ -464,15 +486,55 @@ async def post_location_update(channel_id, user_location):
             embed.set_author(name="📍 LOCATION UPDATE", icon_url="https://i.imgur.com/location.png")
         
         await channel.send(embed=embed)
+        print(f"✅ Location update posted to Discord")
         
     except Exception as e:
-        print(f"Error posting location update: {e}")
+        print(f"❌ Error posting location update: {e}")
+
+# Flask webhook endpoints
+@app.route('/webhook/location', methods=['POST'])
+def location_webhook():
+    """Webhook endpoint to receive location data from website"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data received"}), 400
+        
+        print(f"📍 Received location data: {data}")
+        
+        # Schedule the Discord post in the bot's event loop
+        asyncio.run_coroutine_threadsafe(
+            post_location_update(data), 
+            bot.loop
+        )
+        
+        return jsonify({"status": "success", "message": "Location received"}), 200
+        
+    except Exception as e:
+        print(f"❌ Webhook error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    return jsonify({"status": "healthy", "bot": bot.user.name if bot.user else "Not connected"}), 200
+
+def run_flask():
+    """Run Flask app in a separate thread"""
+    port = int(os.getenv('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
 
 # Get bot token from environment variable
 TOKEN = os.getenv('DISCORD_TOKEN')
 
 if __name__ == "__main__":
     if TOKEN:
+        # Start Flask in a separate thread
+        flask_thread = Thread(target=run_flask, daemon=True)
+        flask_thread.start()
+        print(f"🌐 Flask webhook server starting...")
+        
+        # Run the Discord bot
         bot.run(TOKEN)
     else:
         print("❌ Error: DISCORD_TOKEN environment variable not found!")
