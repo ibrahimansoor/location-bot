@@ -320,23 +320,37 @@ async def post_location_update(channel_id, user_location):
         lat = float(user_location['latitude'])
         lng = float(user_location['longitude'])
         accuracy = user_location.get('accuracy', 'Unknown')
+        is_manual_checkin = user_location.get('isManualCheckIn', False)
+        selected_store_name = user_location.get('selectedStore', None)
         
         # Find closest store
         closest_store, distance = find_closest_store(lat, lng)
         
         if not closest_store:
             return
+        
+        # If it's a manual check-in, use the selected store and set distance to 0
+        if is_manual_checkin and selected_store_name:
+            # Find the selected store in our database
+            for store in STORES:
+                if store['name'] == selected_store_name:
+                    closest_store = store
+                    distance = 0.0  # Manual check-in = at the store
+                    break
             
         # Get store branding
         branding = get_store_branding(closest_store['name'])
         
-        # Get status indicator
-        indicator, status = get_status_indicator(distance)
+        # Get status indicator (manual check-ins are always "AT STORE")
+        if is_manual_checkin:
+            indicator, status = "🟢", "AT STORE"
+        else:
+            indicator, status = get_status_indicator(distance)
         
         # Create beautiful embed
         embed = discord.Embed(
             title=f"{branding['emoji']} Location: {closest_store['name']}",
-            description=f"Someone is **{distance:.1f} miles** from {closest_store['name']}",
+            description=f"Someone is **{distance:.1f} miles** from {closest_store['name']}" if distance > 0 else f"Someone checked in to **{closest_store['name']}**",
             color=branding['color']
         )
         
@@ -364,11 +378,18 @@ async def post_location_update(channel_id, user_location):
         )
         
         # Distance check with beautiful indicators
-        embed.add_field(
-            name="📏 Distance Check",
-            value=f"{indicator} **{distance:.1f} miles** from {closest_store['name']}",
-            inline=True
-        )
+        if distance > 0:
+            embed.add_field(
+                name="📏 Distance Check",
+                value=f"{indicator} **{distance:.1f} miles** from {closest_store['name']}",
+                inline=True
+            )
+        else:
+            embed.add_field(
+                name="✅ Check-In",
+                value=f"{indicator} **Manual check-in** to {closest_store['name']}",
+                inline=True
+            )
         
         # Status field
         status_descriptions = {
@@ -391,11 +412,18 @@ async def post_location_update(channel_id, user_location):
         )
         
         # Accuracy
-        embed.add_field(
-            name="🎯 Accuracy",
-            value=f"±{accuracy} meters",
-            inline=True
-        )
+        if is_manual_checkin:
+            embed.add_field(
+                name="🎯 Method",
+                value="Manual Store Selection",
+                inline=True
+            )
+        else:
+            embed.add_field(
+                name="🎯 Accuracy",
+                value=f"±{accuracy} meters",
+                inline=True
+            )
         
         # Google Maps link
         maps_url = f"https://maps.google.com/maps?q={lat},{lng}"
@@ -405,24 +433,31 @@ async def post_location_update(channel_id, user_location):
             inline=True
         )
         
-        # Find nearby stores for additional context
-        nearby_stores = find_nearby_stores(lat, lng, 2)  # 2 mile radius
-        if len(nearby_stores) > 1:
-            other_stores = [store['store']['name'] for store in nearby_stores[1:4]]  # Skip closest store
-            if other_stores:
-                embed.add_field(
-                    name="🏪 Other Nearby Stores",
-                    value="\n".join([f"• {store}" for store in other_stores]),
-                    inline=False
-                )
+        # Find nearby stores for additional context (only for GPS-based check-ins)
+        if not is_manual_checkin:
+            nearby_stores = find_nearby_stores(lat, lng, 2)  # 2 mile radius
+            if len(nearby_stores) > 1:
+                other_stores = [store['store']['name'] for store in nearby_stores[1:4]]  # Skip closest store
+                if other_stores:
+                    embed.add_field(
+                        name="🏪 Other Nearby Stores",
+                        value="\n".join([f"• {store}" for store in other_stores]),
+                        inline=False
+                    )
         
         # Footer with timestamp
-        embed.set_footer(text="Location Sharing System • Real-time tracking")
+        if is_manual_checkin:
+            embed.set_footer(text="Location Sharing System • Manual Check-In")
+        else:
+            embed.set_footer(text="Location Sharing System • GPS Location")
         embed.timestamp = discord.utils.utcnow()
         
         # Add visual border based on status
         if status == "AT STORE":
-            embed.set_author(name="✅ CONFIRMED AT LOCATION", icon_url="https://i.imgur.com/check-mark.png")
+            if is_manual_checkin:
+                embed.set_author(name="✅ MANUAL CHECK-IN CONFIRMED", icon_url="https://i.imgur.com/check-mark.png")
+            else:
+                embed.set_author(name="✅ CONFIRMED AT LOCATION", icon_url="https://i.imgur.com/check-mark.png")
         elif status == "NEARBY":
             embed.set_author(name="⚠️ NEARBY LOCATION", icon_url="https://i.imgur.com/warning.png")
         else:
