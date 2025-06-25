@@ -125,6 +125,7 @@ STORES = [
 # Global state
 LOCATION_CHANNEL_ID = None
 bot_ready = False
+bot_connected = False
 
 def safe_print(msg):
     """Safe printing for Railway logs"""
@@ -238,16 +239,18 @@ def get_status_indicator(distance):
 # Bot events
 @bot.event
 async def on_ready():
-    global bot_ready
-    safe_print(f"Discord bot connected: {bot.user}")
-    safe_print(f"Loaded {len(STORES)} store locations")
+    global bot_ready, bot_connected
+    safe_print(f"🤖 Discord bot connected: {bot.user}")
+    safe_print(f"📍 Loaded {len(STORES)} store locations")
+    bot_connected = True
     
     try:
         synced = await bot.tree.sync()
-        safe_print(f"Synced {len(synced)} slash commands")
+        safe_print(f"🔄 Synced {len(synced)} slash commands")
         bot_ready = True
+        safe_print("✅ Bot is now fully ready for webhooks!")
     except Exception as e:
-        safe_print(f"Failed to sync commands: {e}")
+        safe_print(f"❌ Failed to sync commands: {e}")
 
 @bot.event
 async def on_error(event, *args, **kwargs):
@@ -259,6 +262,7 @@ async def ping(interaction: discord.Interaction):
     """Test command"""
     try:
         await interaction.response.send_message("🏓 Pong! Bot is working!")
+        safe_print("Ping command executed successfully")
     except Exception as e:
         safe_print(f"Ping command error: {e}")
 
@@ -313,16 +317,24 @@ async def location_command(interaction: discord.Interaction):
 # Location posting function
 async def post_location_to_discord(location_data):
     """Post location update to Discord with beautiful styling"""
-    global LOCATION_CHANNEL_ID, bot_ready
+    global LOCATION_CHANNEL_ID, bot_ready, bot_connected
     
     try:
-        if not LOCATION_CHANNEL_ID or not bot_ready:
-            safe_print("Bot not ready or no channel set")
+        if not bot_connected:
+            safe_print("❌ Discord bot not connected yet")
+            return False
+            
+        if not bot_ready:
+            safe_print("❌ Discord bot not ready yet (commands not synced)")
+            return False
+            
+        if not LOCATION_CHANNEL_ID:
+            safe_print("❌ No channel ID set for location updates")
             return False
         
         channel = bot.get_channel(LOCATION_CHANNEL_ID)
         if not channel:
-            safe_print(f"Channel {LOCATION_CHANNEL_ID} not found")
+            safe_print(f"❌ Channel {LOCATION_CHANNEL_ID} not found")
             return False
         
         lat = float(location_data['latitude'])
@@ -493,11 +505,11 @@ async def post_location_to_discord(location_data):
             )
         
         await channel.send(embed=embed)
-        safe_print("Successfully posted beautiful location to Discord")
+        safe_print("✅ Successfully posted beautiful location to Discord")
         return True
         
     except Exception as e:
-        safe_print(f"Error posting to Discord: {e}")
+        safe_print(f"❌ Error posting to Discord: {e}")
         return False
 
 # Flask routes
@@ -926,6 +938,8 @@ def index():
                 });
 
                 console.log('Response status:', response.status);
+                const responseData = await response.json();
+                console.log('Response data:', responseData);
                 
                 if (response.ok) {
                     if (location.selectedStore) {
@@ -955,8 +969,7 @@ def index():
                         }, 500);
                     }, 2000);
                 } else {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error || 'Failed to share location');
+                    throw new Error(responseData.error || 'Failed to share location');
                 }
             } catch (error) {
                 console.error('Error posting location:', error);
@@ -1041,7 +1054,7 @@ def index():
 
 @app.route('/webhook/location', methods=['POST'])
 def location_webhook():
-    """Handle location data from website"""
+    """Handle location data from website with better readiness checks"""
     try:
         data = request.get_json()
         if not data:
@@ -1050,28 +1063,39 @@ def location_webhook():
         
         safe_print(f"Webhook received location data: {data}")
         
+        # Better readiness checks
+        if not bot_connected:
+            safe_print("❌ Bot not connected yet, webhook rejected")
+            return jsonify({"error": "Discord bot is still connecting, please wait a moment and try again"}), 503
+            
+        if not bot_ready:
+            safe_print("❌ Bot commands not synced yet, webhook rejected")
+            return jsonify({"error": "Discord bot is still starting up, please wait a moment and try again"}), 503
+        
         # Send to Discord
-        if bot_ready and bot.loop and not bot.loop.is_closed():
+        if bot.loop and not bot.loop.is_closed():
             future = asyncio.run_coroutine_threadsafe(
                 post_location_to_discord(data), 
                 bot.loop
             )
             
             try:
-                result = future.result(timeout=10)  # 10 second timeout
+                result = future.result(timeout=15)  # 15 second timeout
                 if result:
+                    safe_print("✅ Successfully posted location to Discord")
                     return jsonify({"status": "success", "message": "Location shared successfully"}), 200
                 else:
-                    return jsonify({"error": "Failed to post to Discord"}), 500
+                    safe_print("❌ Failed to post location to Discord")
+                    return jsonify({"error": "Failed to post to Discord channel"}), 500
             except Exception as e:
-                safe_print(f"Discord posting failed: {e}")
+                safe_print(f"❌ Discord posting failed: {e}")
                 return jsonify({"error": "Discord posting failed"}), 500
         else:
-            safe_print("Bot not ready for webhook")
-            return jsonify({"error": "Bot not ready"}), 503
+            safe_print("❌ Bot loop not available")
+            return jsonify({"error": "Bot loop not available"}), 503
         
     except Exception as e:
-        safe_print(f"Webhook error: {e}")
+        safe_print(f"❌ Webhook error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/health', methods=['GET'])
@@ -1079,6 +1103,7 @@ def health():
     """Health check endpoint"""
     return jsonify({
         "status": "healthy",
+        "bot_connected": bot_connected,
         "bot_ready": bot_ready,
         "bot_user": str(bot.user) if bot.user else None,
         "stores_loaded": len(STORES)
@@ -1098,14 +1123,14 @@ def run_flask():
     """Run Flask server"""
     try:
         port = int(os.getenv('PORT', 5000))
-        safe_print(f"Starting Flask server on port {port}")
+        safe_print(f"🌐 Starting Flask server on port {port}")
         app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False, threaded=True)
     except Exception as e:
-        safe_print(f"Flask startup error: {e}")
+        safe_print(f"❌ Flask startup error: {e}")
 
-# Main execution
+# Main execution  
 def main():
-    """Main function"""
+    """Main function with better startup sequence"""
     safe_print("=== Starting Beautiful Location Bot ===")
     
     TOKEN = os.getenv('DISCORD_TOKEN')
@@ -1117,19 +1142,37 @@ def main():
     safe_print("✅ Discord token found")
     safe_print(f"✅ Loaded {len(STORES)} store locations")
     
-    # Start Flask server in background
-    try:
-        flask_thread = threading.Thread(target=run_flask, daemon=True)
-        flask_thread.start()
-        safe_print("🌐 Flask server thread started")
-        
-        # Give Flask time to start
+    # Start Discord bot first (in background)
+    def start_bot():
+        safe_print("🤖 Starting Discord bot...")
+        try:
+            bot.run(TOKEN)
+        except Exception as e:
+            safe_print(f"❌ Bot error: {e}")
+    
+    bot_thread = threading.Thread(target=start_bot, daemon=True)
+    bot_thread.start()
+    
+    # Wait for bot to connect before starting Flask
+    safe_print("⏰ Waiting for Discord bot to connect...")
+    max_wait = 30  # 30 seconds max wait
+    waited = 0
+    while not bot_connected and waited < max_wait:
+        time.sleep(1)
+        waited += 1
+        if waited % 5 == 0:
+            safe_print(f"⏰ Still waiting for bot connection... ({waited}s)")
+    
+    if bot_connected:
+        safe_print("✅ Discord bot connected! Starting Flask server...")
+        # Give it a moment for commands to sync
         time.sleep(3)
-        safe_print("⏰ Starting Discord bot...")
-        
-        # Run Discord bot (this blocks)
-        bot.run(TOKEN)
-        
+    else:
+        safe_print("⚠️ Bot not connected yet, but starting Flask anyway...")
+    
+    # Start Flask server (this blocks)
+    try:
+        run_flask()
     except Exception as e:
         safe_print(f"❌ Critical error: {e}")
 
