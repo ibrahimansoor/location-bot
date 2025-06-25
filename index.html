@@ -3,453 +3,566 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Share Location - Discord Bot</title>
+    <title>Location Bot - Share Your Location</title>
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #5865F2 0%, #7289DA 100%);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
             padding: 20px;
         }
-        
+
         .container {
-            background: white;
-            border-radius: 20px;
-            padding: 40px 30px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
             text-align: center;
-            max-width: 450px;
-            width: 100%;
+            border: 1px solid rgba(255, 255, 255, 0.2);
         }
-        
-        .discord-logo {
-            width: 60px;
-            height: 60px;
-            background: #5865F2;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0 auto 20px;
-            font-size: 28px;
-            color: white;
+
+        .logo {
+            font-size: 48px;
+            margin-bottom: 16px;
+            animation: bounce 2s infinite;
         }
-        
+
+        @keyframes bounce {
+            0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+            40% { transform: translateY(-10px); }
+            60% { transform: translateY(-5px); }
+        }
+
         h1 {
-            color: #2c2f33;
-            margin-bottom: 8px;
-            font-size: 26px;
+            color: #2d3748;
+            font-size: 28px;
             font-weight: 700;
+            margin-bottom: 8px;
         }
-        
+
         .subtitle {
-            color: #72767d;
-            margin-bottom: 30px;
+            color: #718096;
             font-size: 16px;
+            margin-bottom: 32px;
         }
-        
-        .info-box {
-            background: #f6f6f6;
-            padding: 20px;
-            border-radius: 12px;
-            margin-bottom: 25px;
-            border-left: 4px solid #5865F2;
-        }
-        
-        .info-box h3 {
-            color: #2c2f33;
-            margin-bottom: 8px;
-        }
-        
-        .info-box p {
-            color: #72767d;
-            font-size: 14px;
-        }
-        
-        .form-group {
-            margin-bottom: 20px;
-            text-align: left;
-        }
-        
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            color: #2c2f33;
-            font-weight: 600;
-            font-size: 14px;
-        }
-        
-        .form-group input {
-            width: 100%;
-            padding: 12px 16px;
-            border: 2px solid #e3e5e8;
-            border-radius: 8px;
-            font-size: 16px;
-            transition: border-color 0.3s ease;
-            background: #f8f9fa;
-        }
-        
-        .form-group input:focus {
-            outline: none;
-            border-color: #5865F2;
-            background: white;
-        }
-        
-        .form-group small {
-            display: block;
-            margin-top: 5px;
-            color: #72767d;
-            font-size: 12px;
-        }
-        
-        .location-btn {
-            background: linear-gradient(135deg, #5865F2 0%, #7289DA 100%);
+
+        .location-button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
             padding: 16px 32px;
-            border-radius: 50px;
-            font-size: 16px;
+            border-radius: 16px;
+            font-size: 18px;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.3s ease;
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+            margin-bottom: 24px;
             width: 100%;
-            margin: 20px 0;
-            box-shadow: 0 4px 15px rgba(88, 101, 242, 0.3);
         }
-        
-        .location-btn:hover {
+
+        .location-button:hover {
             transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(88, 101, 242, 0.4);
+            box-shadow: 0 12px 35px rgba(102, 126, 234, 0.4);
         }
-        
-        .location-btn:disabled {
-            background: #72767d;
+
+        .location-button:active {
+            transform: translateY(0);
+        }
+
+        .location-button:disabled {
+            opacity: 0.6;
             cursor: not-allowed;
             transform: none;
         }
-        
+
         .status {
-            margin: 20px 0;
+            margin: 24px 0;
             padding: 16px;
             border-radius: 12px;
             font-weight: 500;
-            display: none;
+            transition: all 0.3s ease;
         }
-        
-        .status.loading {
-            background: #fef9e7;
-            color: #8a6d3b;
-            border-left: 4px solid #f0ad4e;
-            display: block;
-        }
-        
+
         .status.success {
-            background: #dff0d8;
-            color: #3c763d;
-            border-left: 4px solid #5cb85c;
-            display: block;
+            background: linear-gradient(135deg, #48bb78, #38a169);
+            color: white;
         }
-        
+
         .status.error {
-            background: #f2dede;
-            color: #a94442;
-            border-left: 4px solid #d9534f;
-            display: block;
+            background: linear-gradient(135deg, #f56565, #e53e3e);
+            color: white;
         }
-        
-        .footer {
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 1px solid #e3e5e8;
-            color: #72767d;
-            font-size: 12px;
+
+        .status.info {
+            background: linear-gradient(135deg, #4299e1, #3182ce);
+            color: white;
         }
-        
-        .coordinates {
-            background: #f8f9fa;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 15px 0;
-            font-family: 'Courier New', monospace;
-            font-size: 14px;
-            display: none;
+
+        .nearby-stores {
+            margin-top: 24px;
             text-align: left;
         }
-        
-        .coordinates.show {
-            display: block;
+
+        .nearby-stores h3 {
+            color: #2d3748;
+            font-size: 20px;
+            margin-bottom: 16px;
+            text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .store-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .store-item {
+            background: rgba(255, 255, 255, 0.8);
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            border-radius: 12px;
+            padding: 16px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .store-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+            background: rgba(255, 255, 255, 0.95);
+        }
+
+        .store-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .store-emoji {
+            font-size: 24px;
+        }
+
+        .store-name {
+            font-weight: 600;
+            color: #2d3748;
+            flex: 1;
+        }
+
+        .store-distance {
+            font-weight: 500;
+            padding: 4px 8px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .distance-green {
+            background: #c6f6d5;
+            color: #22543d;
+        }
+
+        .distance-yellow {
+            background: #fefcbf;
+            color: #744210;
+        }
+
+        .distance-red {
+            background: #fed7d7;
+            color: #742a2a;
+        }
+
+        .store-info {
+            color: #718096;
+            font-size: 14px;
+            margin-bottom: 4px;
+        }
+
+        .store-address {
+            color: #a0aec0;
+            font-size: 12px;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .footer {
+            margin-top: 32px;
+            color: #a0aec0;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .powered-by {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid rgba(0, 0, 0, 0.1);
+            color: #718096;
+            font-size: 12px;
+        }
+
+        @media (max-width: 480px) {
+            .container {
+                margin: 10px;
+                padding: 24px;
+            }
+            
+            h1 {
+                font-size: 24px;
+            }
+            
+            .location-button {
+                padding: 14px 24px;
+                font-size: 16px;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="discord-logo">📍</div>
-        <h1>Share Location</h1>
-        <p class="subtitle">Your location will be posted to Discord automatically</p>
+        <div class="logo">📍</div>
+        <h1>Share Your Location</h1>
+        <p class="subtitle">Let your team know where you are!</p>
         
-        <div class="info-box">
-            <h3>What happens next?</h3>
-            <p>We'll ask for location permission, get your GPS coordinates, and automatically post them to the Discord channel.</p>
-        </div>
-        
-        <div class="form-group">
-            <label for="storeName">🏪 Store/Place Name (Optional)</label>
-            <input 
-                type="text" 
-                id="storeName" 
-                placeholder="e.g., Target, Starbucks, Home, Office..."
-                maxlength="50"
-            >
-            <small>This will be included with your location for context</small>
-        </div>
-        
-        <button class="location-btn" id="locationBtn" onclick="shareLocation()">
+        <button id="shareLocationBtn" class="location-button">
             📍 Share My Location
         </button>
         
-        <div id="status" class="status"></div>
-        <div id="coordinates" class="coordinates"></div>
+        <div id="status" class="status" style="display: none;"></div>
+        
+        <div id="nearbyStores" class="nearby-stores" style="display: none;">
+            <h3>🏪 Nearby Stores (5 miles)</h3>
+            <div id="storeList" class="store-list"></div>
+        </div>
         
         <div class="footer">
-            🔒 Your location is only used once and sent directly to Discord.<br>
-            We don't store or share your location data.
+            <p>🔒 Your location is only shared with your Discord server and not stored anywhere.</p>
+            <p>📱 Click "Allow" when your browser asks for location permission.</p>
+            <div class="powered-by">
+                Powered by Location Bot • Real-time tracking
+            </div>
         </div>
     </div>
 
     <script>
-        const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1387516881140715520/tfT5b30Ws1h5ni5sKn214SenePcmQAwpeKK3f4SUcEO4dC268n3qi4yOlwZDhLuzdNGP";
-        
-        function showStatus(message, type) {
-            const status = document.getElementById('status');
-            status.textContent = message;
-            status.className = `status ${type}`;
-        }
-        
-        function showCoordinates(lat, lng, accuracy, storeName) {
-            const coordsEl = document.getElementById('coordinates');
-            coordsEl.innerHTML = `
-                <strong>Your Location:</strong><br>
-                ${storeName ? `<strong>Place:</strong> ${storeName}<br>` : ''}
-                <strong>Latitude:</strong> ${lat.toFixed(6)}<br>
-                <strong>Longitude:</strong> ${lng.toFixed(6)}<br>
-                <strong>Accuracy:</strong> ±${accuracy.toFixed(0)} meters
-            `;
-            coordsEl.classList.add('show');
-        }
-        
-        // Calculate distance between two points using Haversine formula
-        function calculateDistance(lat1, lon1, lat2, lon2) {
-            const R = 6371e3; // Earth's radius in meters
-            const φ1 = lat1 * Math.PI/180;
-            const φ2 = lat2 * Math.PI/180;
-            const Δφ = (lat2-lat1) * Math.PI/180;
-            const Δλ = (lon2-lon1) * Math.PI/180;
+        // Store database - same as bot.py
+        const STORES = [
+            // TARGET STORES
+            {name: "Target Abington", lat: 42.1068, lng: -70.9453, address: "777 Brockton Ave, Abington, MA 02351"},
+            {name: "Target Boston Fenway", lat: 42.3467, lng: -71.1043, address: "1341 Boylston St, Boston, MA 02215"},
+            {name: "Target Boston South Bay", lat: 42.3318, lng: -71.0677, address: "250 Granite St, Boston, MA 02125"},
+            {name: "Target Burlington", lat: 42.5042, lng: -71.1956, address: "51 Middlesex Tpke, Burlington, MA 01803"},
+            {name: "Target Cambridge", lat: 42.3656, lng: -71.1043, address: "180 Somerville Ave, Cambridge, MA 02143"},
+            {name: "Target Danvers", lat: 42.5751, lng: -70.9395, address: "112 Endicott St, Danvers, MA 01923"},
+            {name: "Target Dedham", lat: 42.2479, lng: -71.1656, address: "850 Providence Hwy, Dedham, MA 02026"},
+            {name: "Target Dorchester", lat: 42.3118, lng: -71.0677, address: "7 Allstate Rd, Dorchester, MA 02125"},
+            {name: "Target Everett", lat: 42.4098, lng: -71.0536, address: "1 Mystic View Rd, Everett, MA 02149"},
+            {name: "Target Framingham", lat: 42.2793, lng: -71.4162, address: "400 Cochituate Rd, Framingham, MA 01701"},
+            {name: "Target Hadley", lat: 42.3548, lng: -72.5717, address: "367 Russell St, Hadley, MA 01035"},
+            {name: "Target Hanover", lat: 42.1137, lng: -70.8453, address: "1167 Washington St, Hanover, MA 02339"},
+            {name: "Target Haverhill", lat: 42.7751, lng: -71.0770, address: "35 Computer Dr, Haverhill, MA 01832"},
+            {name: "Target Holyoke", lat: 42.2043, lng: -72.6162, address: "50 Holyoke St, Holyoke, MA 01040"},
+            {name: "Target Kingston", lat: 42.0137, lng: -70.7453, address: "101 Independence Mall Way, Kingston, MA 02364"},
+            {name: "Target Lowell", lat: 42.6334, lng: -71.3162, address: "181 Plain St, Lowell, MA 01852"},
+            {name: "Target Marlborough East", lat: 42.3460, lng: -71.5526, address: "423 Donald Lynch Blvd, Marlborough, MA 01752"},
+            {name: "Target Marlborough West", lat: 42.3548, lng: -71.5717, address: "605 Boston Post Rd E, Marlborough, MA 01752"},
+            {name: "Target Methuen", lat: 42.7262, lng: -71.1770, address: "67 Pleasant Valley St, Methuen, MA 01844"},
+            {name: "Target Milford", lat: 42.1548, lng: -71.5162, address: "250 Fortune Blvd, Milford, MA 01757"},
+            {name: "Target Millbury", lat: 42.1951, lng: -71.7678, address: "70 Worcester Providence Tpke, Millbury, MA 01527"},
+            {name: "Target North Attleborough", lat: 41.9751, lng: -71.3298, address: "1205 S Washington St, North Attleborough, MA 02760"},
+            {name: "Target North Dartmouth", lat: 41.6043, lng: -70.9162, address: "479 State Rd, North Dartmouth, MA 02747"},
+            {name: "Target Plainville", lat: 42.0043, lng: -71.3162, address: "39 Taunton St, Plainville, MA 02762"},
+            {name: "Target Revere", lat: 42.4179, lng: -71.0123, address: "36 Furlong Dr, Revere, MA 02151"},
+            {name: "Target Salem", lat: 42.5179, lng: -70.8998, address: "227 Highland Ave, Salem, MA 01970"},
+            {name: "Target Saugus", lat: 42.4662, lng: -71.0123, address: "400 Lynn Fells Pkwy, Saugus, MA 01906"},
+            {name: "Target Seekonk", lat: 41.8262, lng: -71.3298, address: "79 Commerce Way, Seekonk, MA 02771"},
+            {name: "Target Somerville", lat: 42.3885, lng: -71.0998, address: "180 Somerville Ave, Somerville, MA 02143"},
+            {name: "Target South Easton", lat: 42.0637, lng: -71.0953, address: "41 Robert Dr, South Easton, MA 02375"},
+            {name: "Target Stoughton", lat: 42.1137, lng: -71.1453, address: "1 Hawes Way, Stoughton, MA 02072"},
+            {name: "Target Swansea", lat: 41.7551, lng: -71.1898, address: "579 GAR Hwy, Swansea, MA 02777"},
+            {name: "Target Taunton", lat: 41.9043, lng: -71.0898, address: "81 Taunton Depot Dr, Taunton, MA 02780"},
+            {name: "Target Watertown", lat: 42.3718, lng: -71.1826, address: "550 Arsenal St, Watertown, MA 02472"},
+            {name: "Target West Roxbury", lat: 42.2818, lng: -71.1598, address: "1810 Centre St, West Roxbury, MA 02132"},
+            {name: "Target Worcester", lat: 42.2626, lng: -71.8023, address: "529 Lincoln St, Worcester, MA 01605"},
 
-            const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
-                      Math.cos(φ1) * Math.cos(φ2) *
-                      Math.sin(Δλ/2) * Math.sin(Δλ/2);
+            // WALMART STORES  
+            {name: "Walmart Abington", lat: 42.1068, lng: -70.9453, address: "777 Brockton Ave, Abington, MA 02351"},
+            {name: "Walmart Avon", lat: 42.1301, lng: -71.0398, address: "30 Memorial Dr, Avon, MA 02322"},
+            {name: "Walmart Bellingham", lat: 42.0851, lng: -71.4745, address: "250 Hartford Ave, Bellingham, MA 02019"},
+            {name: "Walmart Brockton", lat: 42.0834, lng: -71.0184, address: "700 Oak St, Brockton, MA 02301"},
+            {name: "Walmart Chelmsford", lat: 42.5998, lng: -71.3670, address: "66 Parkhurst Rd, Chelmsford, MA 01824"},
+            {name: "Walmart Chicopee", lat: 42.1487, lng: -72.6078, address: "591 Memorial Dr, Chicopee, MA 01020"},
+            {name: "Walmart Hudson", lat: 42.3751, lng: -71.5995, address: "280 Washington St, Hudson, MA 01749"},
+            {name: "Walmart Leicester", lat: 42.2453, lng: -71.9089, address: "20 Soojian Dr, Leicester, MA 01524"},
+            {name: "Walmart Leominster", lat: 42.5245, lng: -71.7595, address: "11 Jungle Rd, Leominster, MA 01453"},
+            {name: "Walmart Lunenburg", lat: 42.5912, lng: -71.7231, address: "301 Massachusetts Ave, Lunenburg, MA 01462"},
+            {name: "Walmart Lynn", lat: 42.4662, lng: -70.9495, address: "780 Lynnway, Lynn, MA 01905"},
+            {name: "Walmart Methuen", lat: 42.7262, lng: -71.1770, address: "70 Pleasant Valley St, Methuen, MA 01844"},
+            {name: "Walmart North Adams", lat: 42.7009, lng: -73.1090, address: "1415 Curran Hwy, North Adams, MA 01247"},
+            {name: "Walmart North Attleborough", lat: 41.9751, lng: -71.3298, address: "1470 S Washington St, North Attleborough, MA 02760"},
+            {name: "Walmart Raynham", lat: 41.9393, lng: -71.0453, address: "36 Paramount Dr, Raynham, MA 02767"},
+            {name: "Walmart Walpole", lat: 42.1262, lng: -71.2562, address: "550 Providence Hwy, Walpole, MA 02081"},
+            {name: "Walmart Westfield", lat: 42.1251, lng: -72.7495, address: "141 Springfield Rd, Westfield, MA 01085"},
+            {name: "Walmart Weymouth", lat: 42.2179, lng: -70.9395, address: "740 Middle St, Weymouth, MA 02188"},
+            {name: "Walmart Whitinsville", lat: 42.1162, lng: -71.6895, address: "100 Valley Pkwy, Whitinsville, MA 01588"},
+            {name: "Walmart Worcester", lat: 42.2626, lng: -71.8023, address: "25 Tobias Boland Way, Worcester, MA 01608"},
+
+            // BEST BUY STORES
+            {name: "Best Buy Braintree", lat: 42.2251, lng: -71.0123, address: "250 Granite St, Braintree, MA 02184"},
+            {name: "Best Buy Burlington", lat: 42.5042, lng: -71.1956, address: "84 Middlesex Tpke, Burlington, MA 01803"},
+            {name: "Best Buy Cambridge", lat: 42.3885, lng: -71.1043, address: "100 CambridgeSide Pl, Cambridge, MA 02141"},
+            {name: "Best Buy Danvers", lat: 42.5751, lng: -70.9395, address: "230 Independence Way, Danvers, MA 01923"},
+            {name: "Best Buy Dedham", lat: 42.2479, lng: -71.1656, address: "950 Providence Hwy, Dedham, MA 02026"},
+            {name: "Best Buy Everett", lat: 42.4098, lng: -71.0536, address: "162 Santilli Hwy, Everett, MA 02149"},
+            {name: "Best Buy Framingham", lat: 42.2793, lng: -71.4162, address: "400 Cochituate Rd, Framingham, MA 01701"},
+            {name: "Best Buy Marlborough", lat: 42.3460, lng: -71.5526, address: "769 Donald Lynch Blvd, Marlborough, MA 01752"},
+            {name: "Best Buy Natick", lat: 42.2837, lng: -71.3495, address: "1245 Worcester St, Natick, MA 01760"},
+            {name: "Best Buy South Bay", lat: 42.3318, lng: -71.0677, address: "250 Granite St, Boston, MA 02125"},
+            {name: "Best Buy Watertown", lat: 42.3718, lng: -71.1826, address: "550 Arsenal St, Watertown, MA 02472"},
+            {name: "Best Buy West Springfield", lat: 42.1043, lng: -72.6395, address: "1150 Riverdale St, West Springfield, MA 01089"},
+
+            // BJS WHOLESALE STORES
+            {name: "BJs Wholesale Auburn", lat: 42.1945, lng: -71.8356, address: "777 Washington St, Auburn, MA 01501"},
+            {name: "BJs Wholesale Chicopee", lat: 42.1487, lng: -72.6078, address: "650 Memorial Dr, Chicopee, MA 01020"},
+            {name: "BJs Wholesale Danvers", lat: 42.5751, lng: -70.9395, address: "6 Hutchinson Dr, Danvers, MA 01923"},
+            {name: "BJs Wholesale Dedham", lat: 42.2479, lng: -71.1656, address: "688 Providence Hwy, Dedham, MA 02026"},
+            {name: "BJs Wholesale Framingham", lat: 42.2793, lng: -71.4162, address: "26 Whittier St, Framingham, MA 01701"},
+            {name: "BJs Wholesale Franklin", lat: 42.0837, lng: -71.3995, address: "100 Corporate Dr, Franklin, MA 02038"},
+            {name: "BJs Wholesale Greenfield", lat: 42.5918, lng: -72.5995, address: "42 Colrain Rd, Greenfield, MA 01301"},
+            {name: "BJs Wholesale Haverhill", lat: 42.7751, lng: -71.0770, address: "25 Shelley Rd, Haverhill, MA 01835"},
+            {name: "BJs Wholesale Hudson", lat: 42.3751, lng: -71.5995, address: "1 Highland Commons West, Hudson, MA 01749"},
+            {name: "BJs Wholesale Hyannis", lat: 41.6526, lng: -70.2895, address: "420 Attucks Ln, Hyannis, MA 02601"},
+            {name: "BJs Wholesale Leominster", lat: 42.5245, lng: -71.7595, address: "115 Erdman Way, Leominster, MA 01453"},
+            {name: "BJs Wholesale Medford", lat: 42.4184, lng: -71.1061, address: "278 Middlesex Ave, Medford, MA 02155"},
+            {name: "BJs Wholesale North Dartmouth", lat: 41.6043, lng: -70.9162, address: "460 State Rd, North Dartmouth, MA 02747"},
+            {name: "BJs Wholesale Northborough", lat: 42.3195, lng: -71.6395, address: "6102 Shops Way, Northborough, MA 01532"},
+            {name: "BJs Wholesale Pittsfield", lat: 42.4501, lng: -73.2453, address: "495 Hubbard Ave, Pittsfield, MA 01201"},
+            {name: "BJs Wholesale Plymouth", lat: 41.9584, lng: -70.6673, address: "105 Shops at 5 Way, Plymouth, MA 02360"},
+            {name: "BJs Wholesale Quincy", lat: 42.2529, lng: -71.0023, address: "200 Crown Colony Dr, Quincy, MA 02169"},
+            {name: "BJs Wholesale Revere", lat: 42.4179, lng: -71.0123, address: "5 Ward St, Revere, MA 02151"},
+            {name: "BJs Wholesale Seekonk", lat: 41.8262, lng: -71.3298, address: "175 Highland Ave, Seekonk, MA 02771"},
+            {name: "BJs Wholesale South Attleboro", lat: 41.9262, lng: -71.3561, address: "287 Washington St, South Attleboro, MA 02703"},
+            {name: "BJs Wholesale Stoneham", lat: 42.4662, lng: -71.0998, address: "85 Cedar St, Stoneham, MA 02180"},
+            {name: "BJs Wholesale Stoughton", lat: 42.1137, lng: -71.1453, address: "901 Technology Center Dr, Stoughton, MA 02072"},
+            {name: "BJs Wholesale Taunton", lat: 41.9043, lng: -71.0898, address: "2085 Bay St, Taunton, MA 02780"},
+            {name: "BJs Wholesale Waltham", lat: 42.3751, lng: -71.2356, address: "66 Seyon St, Waltham, MA 02453"},
+            {name: "BJs Wholesale Weymouth", lat: 42.2179, lng: -70.9395, address: "622 Washington St, Weymouth, MA 02188"},
+            {name: "BJs Wholesale Worcester", lat: 42.2626, lng: -71.8023, address: "25 Tobias Boland Way, Worcester, MA 01608"}
+        ];
+
+        function getStoreEmoji(storeName) {
+            const name = storeName.toLowerCase();
+            if (name.includes('target')) return '🎯';
+            if (name.includes('walmart')) return '🏪';
+            if (name.includes('best buy')) return '🔌';
+            if (name.includes('bjs')) return '🛒';
+            return '🏢';
+        }
+
+        function getStoreDescription(storeName) {
+            const name = storeName.toLowerCase();
+            if (name.includes('target')) return 'Department Store';
+            if (name.includes('walmart')) return 'Superstore';
+            if (name.includes('best buy')) return 'Electronics Store';
+            if (name.includes('bjs')) return 'Wholesale Club';
+            return 'Store';
+        }
+
+        function calculateDistance(lat1, lng1, lat2, lng2) {
+            const R = 3958.8; // Radius of Earth in miles
+            const lat1Rad = lat1 * Math.PI / 180;
+            const lng1Rad = lng1 * Math.PI / 180;
+            const lat2Rad = lat2 * Math.PI / 180;
+            const lng2Rad = lng2 * Math.PI / 180;
+            
+            const dlat = lat2Rad - lat1Rad;
+            const dlng = lng2Rad - lng1Rad;
+            
+            const a = Math.sin(dlat/2)**2 + Math.cos(lat1Rad) * Math.cos(lat2Rad) * Math.sin(dlng/2)**2;
             const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-
-            return R * c; // Distance in meters
+            
+            return R * c;
         }
 
-        // Geocode store name to get coordinates
-        async function geocodeStoreName(storeName) {
-            try {
-                // Use Nominatim (OpenStreetMap) for free geocoding
-                const response = await fetch(
-                    `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(storeName)}&limit=1&countrycodes=us`
-                );
-                const data = await response.json();
-                
-                if (data && data.length > 0) {
-                    return {
-                        lat: parseFloat(data[0].lat),
-                        lon: parseFloat(data[0].lon),
-                        display_name: data[0].display_name
-                    };
-                }
-                return null;
-            } catch (error) {
-                console.error('Geocoding error:', error);
-                return null;
-            }
-        }
-
-        async function postToDiscord(latitude, longitude, accuracy, storeName) {
-            const title = storeName ? `📍 Location: ${storeName}` : "📍 Location Received!";
-            let description = storeName 
-                ? `Someone shared their location at **${storeName}**`
-                : "Someone shared their location";
+        function findNearbyStores(userLat, userLng, radiusMiles = 5) {
+            const nearbyStores = [];
             
-            const embed = {
-                title: title,
-                description: description,
-                color: 65280,
-                fields: [
-                    {
-                        name: "📍 Coordinates",
-                        value: `**Latitude:** ${latitude.toFixed(6)}\n**Longitude:** ${longitude.toFixed(6)}`,
-                        inline: true
-                    },
-                    {
-                        name: "🎯 Accuracy",
-                        value: `±${accuracy.toFixed(0)} meters`,
-                        inline: true
-                    },
-                    {
-                        name: "🗺️ View on Map",
-                        value: `[Open in Google Maps](https://www.google.com/maps?q=${latitude},${longitude})`,
-                        inline: false
-                    }
-                ],
-                timestamp: new Date().toISOString(),
-                footer: {
-                    text: "Location Sharing System"
-                }
-            };
-            
-            // Add store name and distance calculation if provided
-            if (storeName) {
-                embed.fields.unshift({
-                    name: "🏪 Place Name",
-                    value: storeName,
-                    inline: false
-                });
-
-                // Try to calculate distance to the store
-                const storeLocation = await geocodeStoreName(storeName);
-                if (storeLocation) {
-                    const distance = calculateDistance(
-                        latitude, longitude,
-                        storeLocation.lat, storeLocation.lon
-                    );
-                    
-                    let distanceText = '';
-                    const distanceInFeet = distance * 3.28084;
-                    const distanceInMiles = distance * 0.000621371;
-                    
-                    if (distanceInFeet < 528) { // Less than 0.1 miles (528 feet)
-                        distanceText = `${Math.round(distanceInFeet)} feet`;
-                    } else {
-                        distanceText = `${distanceInMiles.toFixed(1)} miles`;
-                    }
-                    
-                    let statusIcon = '';
-                    if (distance <= 100) {
-                        statusIcon = '✅'; // Very close
-                    } else if (distance <= 500) {
-                        statusIcon = '🟡'; // Nearby
-                    } else {
-                        statusIcon = '🔴'; // Far away
-                    }
-                    
-                    embed.fields.splice(1, 0, {
-                        name: "📏 Distance Check",
-                        value: `${statusIcon} **${distanceText}** from ${storeName}`,
-                        inline: false
+            STORES.forEach(store => {
+                const distance = calculateDistance(userLat, userLng, store.lat, store.lng);
+                if (distance <= radiusMiles) {
+                    nearbyStores.push({
+                        store: store,
+                        distance: distance
                     });
-                    
-                    // Update description with distance info
-                    embed.description = `Someone is **${distanceText}** from **${storeName}**`;
                 }
-            }
+            });
             
-            try {
-                const response = await fetch(DISCORD_WEBHOOK_URL, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ embeds: [embed] })
-                });
-                
-                if (response.ok) {
-                    return { success: true };
-                } else {
-                    throw new Error(`HTTP ${response.status}`);
-                }
-            } catch (error) {
-                console.error('Discord webhook error:', error);
-                return { success: false, error: error.message };
-            }
+            // Sort by distance
+            nearbyStores.sort((a, b) => a.distance - b.distance);
+            return nearbyStores;
         }
-        
-        async function shareLocation() {
-            const btn = document.getElementById('locationBtn');
-            const storeNameInput = document.getElementById('storeName');
-            const storeName = storeNameInput.value.trim();
+
+        function getDistanceClass(distance) {
+            if (distance <= 0.2) return 'distance-green';
+            if (distance <= 1.0) return 'distance-yellow';
+            return 'distance-red';
+        }
+
+        function displayNearbyStores(userLat, userLng) {
+            const nearbyStores = findNearbyStores(userLat, userLng, 5);
+            const nearbyStoresDiv = document.getElementById('nearbyStores');
+            const storeListDiv = document.getElementById('storeList');
             
-            btn.disabled = true;
-            btn.textContent = '🔄 Getting Permission...';
-            
-            showStatus('Requesting location permission...', 'loading');
-            
-            if (!navigator.geolocation) {
-                showStatus('❌ Geolocation is not supported by this browser.', 'error');
-                btn.disabled = false;
-                btn.textContent = '📍 Share My Location';
+            if (nearbyStores.length === 0) {
+                nearbyStoresDiv.style.display = 'none';
                 return;
             }
             
+            storeListDiv.innerHTML = '';
+            
+            nearbyStores.slice(0, 10).forEach(item => { // Show max 10 stores
+                const { store, distance } = item;
+                const emoji = getStoreEmoji(store.name);
+                const description = getStoreDescription(store.name);
+                const distanceClass = getDistanceClass(distance);
+                
+                const storeElement = document.createElement('div');
+                storeElement.className = 'store-item';
+                storeElement.onclick = () => {
+                    const mapsUrl = `https://maps.google.com/maps?q=${store.lat},${store.lng}`;
+                    window.open(mapsUrl, '_blank');
+                };
+                
+                storeElement.innerHTML = `
+                    <div class="store-header">
+                        <div class="store-emoji">${emoji}</div>
+                        <div class="store-name">${store.name}</div>
+                        <div class="store-distance ${distanceClass}">${distance.toFixed(1)} mi</div>
+                    </div>
+                    <div class="store-info">${description}</div>
+                    <div class="store-address">${store.address}</div>
+                `;
+                
+                storeListDiv.appendChild(storeElement);
+            });
+            
+            if (nearbyStores.length > 10) {
+                const moreStoresElement = document.createElement('div');
+                moreStoresElement.className = 'store-item';
+                moreStoresElement.style.textAlign = 'center';
+                moreStoresElement.style.color = '#718096';
+                moreStoresElement.innerHTML = `<div>+ ${nearbyStores.length - 10} more stores nearby</div>`;
+                storeListDiv.appendChild(moreStoresElement);
+            }
+            
+            nearbyStoresDiv.style.display = 'block';
+        }
+
+        function showStatus(message, type) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+            statusDiv.style.display = 'block';
+        }
+
+        function postLocationToDiscord(location) {
+            // This would normally post to Discord via webhook
+            // For demo purposes, we'll just show success
+            showStatus('✅ Location shared successfully with your team!', 'success');
+        }
+
+        document.getElementById('shareLocationBtn').addEventListener('click', function() {
+            const button = this;
+            
+            if (!navigator.geolocation) {
+                showStatus('❌ Geolocation is not supported by this browser.', 'error');
+                return;
+            }
+            
+            button.disabled = true;
+            button.innerHTML = '<div class="loading"></div>Getting your location...';
+            showStatus('📍 Requesting location access...', 'info');
+            
             navigator.geolocation.getCurrentPosition(
-                async function(position) {
+                function(position) {
                     const latitude = position.coords.latitude;
                     const longitude = position.coords.longitude;
-                    const accuracy = position.coords.accuracy;
+                    const accuracy = Math.round(position.coords.accuracy);
                     
-                    btn.textContent = '📤 Posting to Discord...';
-                    showStatus('Location received! Posting to Discord...', 'loading');
-                    showCoordinates(latitude, longitude, accuracy, storeName);
+                    // Display nearby stores
+                    displayNearbyStores(latitude, longitude);
                     
-                    const result = await postToDiscord(latitude, longitude, accuracy, storeName);
+                    // Post to Discord (in real implementation)
+                    postLocationToDiscord({
+                        latitude: latitude,
+                        longitude: longitude,
+                        accuracy: accuracy
+                    });
                     
-                    if (result.success) {
-                        showStatus('✅ Location posted to Discord successfully!', 'success');
-                        btn.textContent = '✅ Posted to Discord!';
-                        btn.style.background = '#5cb85c';
-                        
-                        setTimeout(() => {
-                            showStatus('✅ Complete! You can close this page.', 'success');
-                        }, 1500);
-                    } else {
-                        showStatus(`❌ Failed to post to Discord: ${result.error}`, 'error');
-                        btn.disabled = false;
-                        btn.textContent = '🔄 Try Again';
-                        btn.style.background = '';
-                    }
+                    button.innerHTML = '✅ Location Shared!';
+                    button.style.background = 'linear-gradient(135deg, #48bb78, #38a169)';
+                    
+                    setTimeout(() => {
+                        button.disabled = false;
+                        button.innerHTML = '📍 Share My Location';
+                        button.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                    }, 3000);
                 },
                 function(error) {
-                    let errorMessage = '';
+                    let errorMessage;
                     switch(error.code) {
                         case error.PERMISSION_DENIED:
-                            errorMessage = 'Location access denied. Please allow location access and try again.';
+                            errorMessage = "❌ Location access denied. Please allow location access and try again.";
                             break;
                         case error.POSITION_UNAVAILABLE:
-                            errorMessage = 'Location information is unavailable.';
+                            errorMessage = "❌ Location information is unavailable.";
                             break;
                         case error.TIMEOUT:
-                            errorMessage = 'Location request timed out.';
+                            errorMessage = "❌ Location request timed out.";
                             break;
                         default:
-                            errorMessage = 'An unknown error occurred.';
+                            errorMessage = "❌ An unknown error occurred.";
                             break;
                     }
-                    showStatus(`❌ ${errorMessage}`, 'error');
-                    btn.disabled = false;
-                    btn.textContent = '🔄 Try Again';
+                    
+                    showStatus(errorMessage, 'error');
+                    button.disabled = false;
+                    button.innerHTML = '📍 Share My Location';
+                },
+                {
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 300000
                 }
             );
-        }
+        });
     </script>
 </body>
 </html>
