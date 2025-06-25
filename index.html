@@ -27,7 +27,7 @@
             padding: 40px 30px;
             box-shadow: 0 20px 40px rgba(0,0,0,0.15);
             text-align: center;
-            max-width: 400px;
+            max-width: 450px;
             width: 100%;
         }
         
@@ -75,6 +75,42 @@
             font-size: 14px;
         }
         
+        .form-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #2c2f33;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e3e5e8;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+            background: #f8f9fa;
+        }
+        
+        .form-group input:focus {
+            outline: none;
+            border-color: #5865F2;
+            background: white;
+        }
+        
+        .form-group small {
+            display: block;
+            margin-top: 5px;
+            color: #72767d;
+            font-size: 12px;
+        }
+        
         .location-btn {
             background: linear-gradient(135deg, #5865F2 0%, #7289DA 100%);
             color: white;
@@ -98,6 +134,7 @@
         .location-btn:disabled {
             background: #72767d;
             cursor: not-allowed;
+            transform: none;
         }
         
         .status {
@@ -145,6 +182,7 @@
             font-family: 'Courier New', monospace;
             font-size: 14px;
             display: none;
+            text-align: left;
         }
         
         .coordinates.show {
@@ -161,6 +199,17 @@
         <div class="info-box">
             <h3>What happens next?</h3>
             <p>We'll ask for location permission, get your GPS coordinates, and automatically post them to the Discord channel.</p>
+        </div>
+        
+        <div class="form-group">
+            <label for="storeName">🏪 Store/Place Name (Optional)</label>
+            <input 
+                type="text" 
+                id="storeName" 
+                placeholder="e.g., Target, Starbucks, Home, Office..."
+                maxlength="50"
+            >
+            <small>This will be included with your location for context</small>
         </div>
         
         <button class="location-btn" id="locationBtn" onclick="shareLocation()">
@@ -185,21 +234,27 @@
             status.className = `status ${type}`;
         }
         
-        function showCoordinates(lat, lng, accuracy) {
+        function showCoordinates(lat, lng, accuracy, storeName) {
             const coordsEl = document.getElementById('coordinates');
             coordsEl.innerHTML = `
-                <strong>Your Coordinates:</strong><br>
-                Latitude: ${lat.toFixed(6)}<br>
-                Longitude: ${lng.toFixed(6)}<br>
-                Accuracy: ±${accuracy.toFixed(0)} meters
+                <strong>Your Location:</strong><br>
+                ${storeName ? `<strong>Place:</strong> ${storeName}<br>` : ''}
+                <strong>Latitude:</strong> ${lat.toFixed(6)}<br>
+                <strong>Longitude:</strong> ${lng.toFixed(6)}<br>
+                <strong>Accuracy:</strong> ±${accuracy.toFixed(0)} meters
             `;
             coordsEl.classList.add('show');
         }
         
-        async function postToDiscord(latitude, longitude, accuracy) {
+        async function postToDiscord(latitude, longitude, accuracy, storeName) {
+            const title = storeName ? `📍 Location: ${storeName}` : "📍 Location Received!";
+            const description = storeName 
+                ? `Someone shared their location at **${storeName}**`
+                : "Someone shared their location";
+            
             const embed = {
-                title: "📍 Location Received!",
-                description: "Someone shared their location",
+                title: title,
+                description: description,
                 color: 65280,
                 fields: [
                     {
@@ -224,6 +279,15 @@
                 }
             };
             
+            // Add store name as a field if provided
+            if (storeName) {
+                embed.fields.unshift({
+                    name: "🏪 Place Name",
+                    value: storeName,
+                    inline: false
+                });
+            }
+            
             try {
                 const response = await fetch(DISCORD_WEBHOOK_URL, {
                     method: 'POST',
@@ -246,6 +310,9 @@
         
         async function shareLocation() {
             const btn = document.getElementById('locationBtn');
+            const storeNameInput = document.getElementById('storeName');
+            const storeName = storeNameInput.value.trim();
+            
             btn.disabled = true;
             btn.textContent = '🔄 Getting Permission...';
             
@@ -266,9 +333,9 @@
                     
                     btn.textContent = '📤 Posting to Discord...';
                     showStatus('Location received! Posting to Discord...', 'loading');
-                    showCoordinates(latitude, longitude, accuracy);
+                    showCoordinates(latitude, longitude, accuracy, storeName);
                     
-                    const result = await postToDiscord(latitude, longitude, accuracy);
+                    const result = await postToDiscord(latitude, longitude, accuracy, storeName);
                     
                     if (result.success) {
                         showStatus('✅ Location posted to Discord successfully!', 'success');
