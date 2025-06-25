@@ -378,6 +378,9 @@
             {name: "BJs Wholesale Worcester", lat: 42.2626, lng: -71.8023, address: "25 Tobias Boland Way, Worcester, MA 01608"}
         ];
 
+        // Configuration - Update these URLs to match your deployment
+        const WEBHOOK_URL = window.location.origin + '/webhook/location';
+
         function getStoreEmoji(storeName) {
             const name = storeName.toLowerCase();
             if (name.includes('target')) return '🎯';
@@ -505,38 +508,63 @@
             });
         }
 
-        function postLocationToDiscord(location) {
-            // In real implementation, this would post to Discord webhook
-            // For now, we'll simulate the success and redirect
-            
-            setTimeout(() => {
-                if (location.selectedStore) {
-                    showStatus('✅ Successfully checked in to ' + location.selectedStore + '!', 'success');
-                } else {
-                    showStatus('✅ Location shared successfully with your team!', 'success');
-                }
+        async function postLocationToDiscord(location) {
+            try {
+                console.log('Sending location to:', WEBHOOK_URL);
+                console.log('Location data:', location);
                 
-                // Redirect back to Discord after 2 seconds
-                setTimeout(() => {
-                    showStatus('🔄 Redirecting back to Discord...', 'info');
+                const response = await fetch(WEBHOOK_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(location)
+                });
+
+                console.log('Response status:', response.status);
+                const responseData = await response.json();
+                console.log('Response data:', responseData);
+                
+                if (response.ok) {
+                    if (location.selectedStore) {
+                        showStatus('✅ Successfully checked in to ' + location.selectedStore + '!', 'success');
+                    } else {
+                        showStatus('✅ Location shared successfully with your team!', 'success');
+                    }
                     
-                    // Try different methods to return to Discord
+                    // Redirect back to Discord after 2 seconds
                     setTimeout(() => {
-                        // Try to close the window/tab (works if opened from Discord)
-                        try {
-                            window.close();
-                        } catch (e) {
-                            // If that fails, try Discord app URL
-                            window.location.href = 'discord://';
-                            
-                            // Fallback: show manual instruction
-                            setTimeout(() => {
-                                showStatus('✅ Check-in complete! You can now return to Discord.', 'success');
-                            }, 1000);
-                        }
-                    }, 500);
-                }, 2000);
-            }, 1000);
+                        showStatus('🔄 Redirecting back to Discord...', 'info');
+                        
+                        // Try different methods to return to Discord
+                        setTimeout(() => {
+                            // Try to close the window/tab (works if opened from Discord)
+                            try {
+                                window.close();
+                            } catch (e) {
+                                // If that fails, try Discord app URL
+                                window.location.href = 'discord://';
+                                
+                                // Fallback: show manual instruction
+                                setTimeout(() => {
+                                    showStatus('✅ Check-in complete! You can now return to Discord.', 'success');
+                                }, 1000);
+                            }
+                        }, 500);
+                    }, 2000);
+                } else {
+                    throw new Error(responseData.error || 'Failed to share location');
+                }
+            } catch (error) {
+                console.error('Error posting location:', error);
+                showStatus('❌ Failed to share location: ' + error.message, 'error');
+                
+                // Re-enable the button
+                const button = document.getElementById('shareLocationBtn');
+                button.disabled = false;
+                button.innerHTML = '📍 Share My Location';
+                button.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+            }
         }
 
         document.getElementById('shareLocationBtn').addEventListener('click', function() {
@@ -560,7 +588,7 @@
                     // Display nearby stores
                     displayNearbyStores(latitude, longitude);
                     
-                    // Post to Discord (in real implementation)
+                    // Post to Discord
                     postLocationToDiscord({
                         latitude: latitude,
                         longitude: longitude,
