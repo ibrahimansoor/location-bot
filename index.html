@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Share Location - Discord Bot</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #5865F2 0%, #7289DA 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+            text-align: center;
+            max-width: 400px;
+            width: 100%;
+        }
+        
+        .discord-logo {
+            width: 60px;
+            height: 60px;
+            background: #5865F2;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            font-size: 28px;
+            color: white;
+        }
+        
+        h1 {
+            color: #2c2f33;
+            margin-bottom: 8px;
+            font-size: 26px;
+            font-weight: 700;
+        }
+        
+        .subtitle {
+            color: #72767d;
+            margin-bottom: 30px;
+            font-size: 16px;
+        }
+        
+        .info-box {
+            background: #f6f6f6;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 25px;
+            border-left: 4px solid #5865F2;
+        }
+        
+        .info-box h3 {
+            color: #2c2f33;
+            margin-bottom: 8px;
+        }
+        
+        .info-box p {
+            color: #72767d;
+            font-size: 14px;
+        }
+        
+        .location-btn {
+            background: linear-gradient(135deg, #5865F2 0%, #7289DA 100%);
+            color: white;
+            border: none;
+            padding: 16px 32px;
+            border-radius: 50px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+            margin: 20px 0;
+            box-shadow: 0 4px 15px rgba(88, 101, 242, 0.3);
+        }
+        
+        .location-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(88, 101, 242, 0.4);
+        }
+        
+        .location-btn:disabled {
+            background: #72767d;
+            cursor: not-allowed;
+        }
+        
+        .status {
+            margin: 20px 0;
+            padding: 16px;
+            border-radius: 12px;
+            font-weight: 500;
+            display: none;
+        }
+        
+        .status.loading {
+            background: #fef9e7;
+            color: #8a6d3b;
+            border-left: 4px solid #f0ad4e;
+            display: block;
+        }
+        
+        .status.success {
+            background: #dff0d8;
+            color: #3c763d;
+            border-left: 4px solid #5cb85c;
+            display: block;
+        }
+        
+        .status.error {
+            background: #f2dede;
+            color: #a94442;
+            border-left: 4px solid #d9534f;
+            display: block;
+        }
+        
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #e3e5e8;
+            color: #72767d;
+            font-size: 12px;
+        }
+        
+        .coordinates {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            display: none;
+        }
+        
+        .coordinates.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="discord-logo">📍</div>
+        <h1>Share Location</h1>
+        <p class="subtitle">Your location will be posted to Discord automatically</p>
+        
+        <div class="info-box">
+            <h3>What happens next?</h3>
+            <p>We'll ask for location permission, get your GPS coordinates, and automatically post them to the Discord channel.</p>
+        </div>
+        
+        <button class="location-btn" id="locationBtn" onclick="shareLocation()">
+            📍 Share My Location
+        </button>
+        
+        <div id="status" class="status"></div>
+        <div id="coordinates" class="coordinates"></div>
+        
+        <div class="footer">
+            🔒 Your location is only used once and sent directly to Discord.<br>
+            We don't store or share your location data.
+        </div>
+    </div>
+
+    <script>
+        const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1387516881140715520/tfT5b30Ws1h5ni5sKn214SenePcmQAwpeKK3f4SUcEO4dC268n3qi4yOlwZDhLuzdNGP";
+        
+        function showStatus(message, type) {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status ${type}`;
+        }
+        
+        function showCoordinates(lat, lng, accuracy) {
+            const coordsEl = document.getElementById('coordinates');
+            coordsEl.innerHTML = `
+                <strong>Your Coordinates:</strong><br>
+                Latitude: ${lat.toFixed(6)}<br>
+                Longitude: ${lng.toFixed(6)}<br>
+                Accuracy: ±${accuracy.toFixed(0)} meters
+            `;
+            coordsEl.classList.add('show');
+        }
+        
+        async function postToDiscord(latitude, longitude, accuracy) {
+            const embed = {
+                title: "📍 Location Received!",
+                description: "Someone shared their location",
+                color: 65280,
+                fields: [
+                    {
+                        name: "📍 Coordinates",
+                        value: `**Latitude:** ${latitude.toFixed(6)}\n**Longitude:** ${longitude.toFixed(6)}`,
+                        inline: true
+                    },
+                    {
+                        name: "🎯 Accuracy",
+                        value: `±${accuracy.toFixed(0)} meters`,
+                        inline: true
+                    },
+                    {
+                        name: "🗺️ View on Map",
+                        value: `[Open in Google Maps](https://www.google.com/maps?q=${latitude},${longitude})`,
+                        inline: false
+                    }
+                ],
+                timestamp: new Date().toISOString(),
+                footer: {
+                    text: "Location Sharing System"
+                }
+            };
+            
+            try {
+                const response = await fetch(DISCORD_WEBHOOK_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ embeds: [embed] })
+                });
+                
+                if (response.ok) {
+                    return { success: true };
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (error) {
+                console.error('Discord webhook error:', error);
+                return { success: false, error: error.message };
+            }
+        }
+        
+        async function shareLocation() {
+            const btn = document.getElementById('locationBtn');
+            btn.disabled = true;
+            btn.textContent = '🔄 Getting Permission...';
+            
+            showStatus('Requesting location permission...', 'loading');
+            
+            if (!navigator.geolocation) {
+                showStatus('❌ Geolocation is not supported by this browser.', 'error');
+                btn.disabled = false;
+                btn.textContent = '📍 Share My Location';
+                return;
+            }
+            
+            navigator.geolocation.getCurrentPosition(
+                async function(position) {
+                    const latitude = position.coords.latitude;
+                    const longitude = position.coords.longitude;
+                    const accuracy = position.coords.accuracy;
+                    
+                    btn.textContent = '📤 Posting to Discord...';
+                    showStatus('Location received! Posting to Discord...', 'loading');
+                    showCoordinates(latitude, longitude, accuracy);
+                    
+                    const result = await postToDiscord(latitude, longitude, accuracy);
+                    
+                    if (result.success) {
+                        showStatus('✅ Location posted to Discord successfully!', 'success');
+                        btn.textContent = '✅ Posted to Discord!';
+                        btn.style.background = '#5cb85c';
+                        
+                        setTimeout(() => {
+                            showStatus('✅ Complete! You can close this page.', 'success');
+                        }, 1500);
+                    } else {
+                        showStatus(`❌ Failed to post to Discord: ${result.error}`, 'error');
+                        btn.disabled = false;
+                        btn.textContent = '🔄 Try Again';
+                        btn.style.background = '';
+                    }
+                },
+                function(error) {
+                    let errorMessage = '';
+                    switch(error.code) {
+                        case error.PERMISSION_DENIED:
+                            errorMessage = 'Location access denied. Please allow location access and try again.';
+                            break;
+                        case error.POSITION_UNAVAILABLE:
+                            errorMessage = 'Location information is unavailable.';
+                            break;
+                        case error.TIMEOUT:
+                            errorMessage = 'Location request timed out.';
+                            break;
+                        default:
+                            errorMessage = 'An unknown error occurred.';
+                            break;
+                    }
+                    showStatus(`❌ ${errorMessage}`, 'error');
+                    btn.disabled = false;
+                    btn.textContent = '🔄 Try Again';
+                }
+            );
+        }
+    </script>
+</body>
+</html>
