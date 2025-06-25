@@ -6,6 +6,11 @@ import asyncio
 from flask import Flask, request, jsonify
 from threading import Thread
 import json
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Flask app for webhook
 app = Flask(__name__)
@@ -248,8 +253,8 @@ async def location(interaction: discord.Interaction):
         color=branding['color']
     )
     
-    # Get your website URL - replace with your actual URL
-    website_url = "https://ibrahimansoor.github.io/location-bot"
+    # Get your website URL - use Railway deployment URL
+    website_url = "https://web-production-f0220.up.railway.app"
     
     # Add location link with better formatting
     embed.add_field(
@@ -330,12 +335,12 @@ async def post_location_update(user_location):
     global LOCATION_CHANNEL_ID
     
     if not LOCATION_CHANNEL_ID:
-        print("❌ No channel ID set for location updates")
+        logger.warning("No channel ID set for location updates")
         return
         
     channel = bot.get_channel(LOCATION_CHANNEL_ID)
     if not channel:
-        print(f"❌ Could not find channel with ID {LOCATION_CHANNEL_ID}")
+        logger.error(f"Could not find channel with ID {LOCATION_CHANNEL_ID}")
         return
     
     try:
@@ -477,19 +482,19 @@ async def post_location_update(user_location):
         # Add visual border based on status
         if status == "AT STORE":
             if is_manual_checkin:
-                embed.set_author(name="✅ MANUAL CHECK-IN CONFIRMED", icon_url="https://i.imgur.com/check-mark.png")
+                embed.set_author(name="✅ MANUAL CHECK-IN CONFIRMED")
             else:
-                embed.set_author(name="✅ CONFIRMED AT LOCATION", icon_url="https://i.imgur.com/check-mark.png")
+                embed.set_author(name="✅ CONFIRMED AT LOCATION")
         elif status == "NEARBY":
-            embed.set_author(name="⚠️ NEARBY LOCATION", icon_url="https://i.imgur.com/warning.png")
+            embed.set_author(name="⚠️ NEARBY LOCATION")
         else:
-            embed.set_author(name="📍 LOCATION UPDATE", icon_url="https://i.imgur.com/location.png")
+            embed.set_author(name="📍 LOCATION UPDATE")
         
         await channel.send(embed=embed)
-        print(f"✅ Location update posted to Discord")
+        logger.info("Location update posted to Discord")
         
     except Exception as e:
-        print(f"❌ Error posting location update: {e}")
+        logger.error(f"Error posting location update: {e}")
 
 # Flask webhook endpoints
 @app.route('/webhook/location', methods=['POST'])
@@ -500,42 +505,69 @@ def location_webhook():
         if not data:
             return jsonify({"error": "No data received"}), 400
         
-        print(f"📍 Received location data: {data}")
+        logger.info(f"Received location data: {data}")
         
         # Schedule the Discord post in the bot's event loop
-        asyncio.run_coroutine_threadsafe(
-            post_location_update(data), 
-            bot.loop
-        )
+        if bot.loop and not bot.loop.is_closed():
+            asyncio.run_coroutine_threadsafe(
+                post_location_update(data), 
+                bot.loop
+            )
+        else:
+            logger.error("Bot loop is not available")
+            return jsonify({"error": "Bot not ready"}), 503
         
         return jsonify({"status": "success", "message": "Location received"}), 200
         
     except Exception as e:
-        print(f"❌ Webhook error: {e}")
+        logger.error(f"Webhook error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    return jsonify({"status": "healthy", "bot": bot.user.name if bot.user else "Not connected"}), 200
+    return jsonify({
+        "status": "healthy", 
+        "bot_ready": bot.user is not None,
+        "bot_name": bot.user.name if bot.user else "Not connected"
+    }), 200
+
+@app.route('/', methods=['GET'])
+def index():
+    """Serve the location sharing page"""
+    try:
+        # Read the HTML file
+        with open('index.html', 'r', encoding='utf-8') as file:
+            html_content = file.read()
+        return html_content
+    except FileNotFoundError:
+        return jsonify({"error": "index.html not found"}), 404
 
 def run_flask():
     """Run Flask app in a separate thread"""
     port = int(os.getenv('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    logger.info(f"Starting Flask server on port {port}")
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 # Get bot token from environment variable
 TOKEN = os.getenv('DISCORD_TOKEN')
 
+async def main():
+    """Main function to run bot and flask together"""
+    if not TOKEN:
+        logger.error("DISCORD_TOKEN environment variable not found!")
+        return
+    
+    # Start Flask in a separate thread
+    flask_thread = Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    logger.info("Flask webhook server starting...")
+    
+    # Run the Discord bot
+    try:
+        await bot.start(TOKEN)
+    except Exception as e:
+        logger.error(f"Bot error: {e}")
+
 if __name__ == "__main__":
-    if TOKEN:
-        # Start Flask in a separate thread
-        flask_thread = Thread(target=run_flask, daemon=True)
-        flask_thread.start()
-        print(f"🌐 Flask webhook server starting...")
-        
-        # Run the Discord bot
-        bot.run(TOKEN)
-    else:
-        print("❌ Error: DISCORD_TOKEN environment variable not found!")
-        print("Please set your Discord bot token in Railway variables.")
+    asyncio.run(main())
