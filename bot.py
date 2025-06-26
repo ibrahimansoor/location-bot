@@ -838,12 +838,15 @@ def index():
         <div id="nearbyStores" class="nearby-stores">
             <h3>🏪 Check In to a Store (5 miles)</h3>
             <div id="storeList" class="store-list"></div>
+            <button id="shareGPSBtn" class="location-button" style="display: none; margin-top: 16px; background: linear-gradient(135deg, #38a169, #2f855a);">
+                📍 Or Share Exact GPS Location
+            </button>
         </div>
         
         <div class="footer">
             <p>🔒 Your location is only shared with your Discord server and not stored anywhere.</p>
             <p>📱 Click "Allow" when your browser asks for location permission.</p>
-            <p>🏪 After allowing location, click on a store to check in to that location.</p>
+            <p>🏪 After getting your location, click on a specific store to check in OR share your exact GPS location.</p>
             <div class="powered-by">
                 Powered by Location Bot • Real-time tracking
             </div>
@@ -919,6 +922,7 @@ def index():
             const nearbyStores = findNearbyStores(userLat, userLng, 5);
             const nearbyStoresDiv = document.getElementById('nearbyStores');
             const storeListDiv = document.getElementById('storeList');
+            const shareGPSBtn = document.getElementById('shareGPSBtn');
             
             if (nearbyStores.length === 0) {
                 nearbyStoresDiv.style.display = 'none';
@@ -961,6 +965,9 @@ def index():
                 storeListDiv.appendChild(moreStoresElement);
             }
             
+            // Show the GPS sharing button
+            shareGPSBtn.style.display = 'block';
+            
             nearbyStoresDiv.style.display = 'block';
         }
 
@@ -971,14 +978,22 @@ def index():
             statusDiv.style.display = 'block';
         }
 
+        // Store user's actual GPS coordinates
+        let userActualLocation = null;
+
         function selectStore(store) {
             showStatus('📍 Checking you in to ' + store.name + '...', 'info');
             
-            // Create location data with user info
+            if (!userActualLocation) {
+                showStatus('❌ No GPS location available. Please share your location first.', 'error');
+                return;
+            }
+            
+            // Create location data using user's ACTUAL coordinates but selected store
             const locationData = {
-                latitude: store.lat,
-                longitude: store.lng,
-                accuracy: 10, // High accuracy since it's a selected store
+                latitude: userActualLocation.latitude,
+                longitude: userActualLocation.longitude,
+                accuracy: userActualLocation.accuracy,
                 selectedStore: store.name,
                 isManualCheckIn: true
             };
@@ -988,7 +1003,7 @@ def index():
                 locationData.user_id = USER_INFO.user_id;
             }
             
-            // Post the store's exact location to Discord
+            // Post the user's actual location with selected store
             postLocationToDiscord(locationData);
         }
 
@@ -1011,6 +1026,8 @@ def index():
                 if (response.ok) {
                     if (location.selectedStore) {
                         showStatus('✅ Successfully checked in to ' + location.selectedStore + '!', 'success');
+                    } else if (location.isManualCheckIn === false) {
+                        showStatus('✅ GPS location shared successfully with your team!', 'success');
                     } else {
                         showStatus('✅ Location shared successfully with your team!', 'success');
                     }
@@ -1067,26 +1084,20 @@ def index():
                     const longitude = position.coords.longitude;
                     const accuracy = Math.round(position.coords.accuracy);
                     
-                    // Display nearby stores
-                    displayNearbyStores(latitude, longitude);
-                    
-                    // Create location data with user info
-                    const locationData = {
+                    // Store user's actual location for later use
+                    userActualLocation = {
                         latitude: latitude,
                         longitude: longitude,
                         accuracy: accuracy
                     };
                     
-                    // Add user info if available
-                    if (USER_INFO && USER_INFO.user_id) {
-                        locationData.user_id = USER_INFO.user_id;
-                    }
+                    // Display nearby stores
+                    displayNearbyStores(latitude, longitude);
                     
-                    // Post to Discord
-                    postLocationToDiscord(locationData);
-                    
-                    button.innerHTML = '✅ Location Shared!';
+                    // Update button and show success message
+                    button.innerHTML = '✅ Location Found!';
                     button.style.background = 'linear-gradient(135deg, #48bb78, #38a169)';
+                    showStatus('📍 Location found! Now click on a store below to check in.', 'success');
                     
                     setTimeout(() => {
                         button.disabled = false;
@@ -1121,6 +1132,32 @@ def index():
                     maximumAge: 300000
                 }
             );
+        });
+        
+        // Add event listener for GPS sharing button
+        document.getElementById('shareGPSBtn').addEventListener('click', function() {
+            if (!userActualLocation) {
+                showStatus('❌ No GPS location available. Please share your location first.', 'error');
+                return;
+            }
+            
+            showStatus('📍 Sharing your exact GPS location...', 'info');
+            
+            // Create location data with user's actual coordinates
+            const locationData = {
+                latitude: userActualLocation.latitude,
+                longitude: userActualLocation.longitude,
+                accuracy: userActualLocation.accuracy,
+                isManualCheckIn: false  // This is GPS sharing, not store check-in
+            };
+            
+            // Add user info if available
+            if (USER_INFO && USER_INFO.user_id) {
+                locationData.user_id = USER_INFO.user_id;
+            }
+            
+            // Post to Discord
+            postLocationToDiscord(locationData);
         });
     </script>
 </body>
