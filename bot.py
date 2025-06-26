@@ -398,25 +398,22 @@ async def post_location_to_discord(location_data):
             for store in STORES:
                 if store['name'] == selected_store:
                     closest_store = store
-                    distance = 0.0
+                    # Calculate REAL distance between user's location and selected store
+                    distance = calculate_distance(lat, lng, store['lat'], store['lng'])
                     break
         
         # Get store branding
         branding = get_store_branding(closest_store['name'])
         
-        # Get status indicator (manual check-ins are always "AT STORE")
-        if is_manual:
-            indicator, status = "🟢", "AT STORE"
-        else:
-            indicator, status = get_status_indicator(distance)
+        # Get status indicator - manual check-ins use real distance, not automatic "AT STORE"
+        indicator, status = get_status_indicator(distance)
         
-        # Create beautiful embed with username
-        if distance > 0:
-            title_text = f"{branding['emoji']} {username} is {distance:.1f} miles from {closest_store['name']}"
-            description_text = f"**{username}** is **{distance:.1f} miles** from {closest_store['name']}"
+        # Create beautiful embed with username - always show real distance
+        title_text = f"{branding['emoji']} {username} is {distance:.1f} miles from {closest_store['name']}"
+        if is_manual:
+            description_text = f"**{username}** manually selected **{closest_store['name']}** ({distance:.1f} miles away)"
         else:
-            title_text = f"{branding['emoji']} {username} checked in to {closest_store['name']}"
-            description_text = f"**{username}** checked in to **{closest_store['name']}**"
+            description_text = f"**{username}** is **{distance:.1f} miles** from {closest_store['name']}"
         
         embed = discord.Embed(
             title=title_text,
@@ -448,19 +445,12 @@ async def post_location_to_discord(location_data):
             inline=True
         )
         
-        # Distance check with beautiful indicators
-        if distance > 0:
-            embed.add_field(
-                name="📏 Distance",
-                value=f"{indicator} **{distance:.1f} miles**",
-                inline=True
-            )
-        else:
-            embed.add_field(
-                name="✅ Check-In",
-                value=f"{indicator} **At Store**",
-                inline=True
-            )
+        # Distance check with beautiful indicators - always show real distance
+        embed.add_field(
+            name="📏 Distance",
+            value=f"{indicator} **{distance:.1f} miles**",
+            inline=True
+        )
         
         # Status field
         status_descriptions = {
@@ -503,11 +493,11 @@ async def post_location_to_discord(location_data):
             inline=True
         )
         
-        # Accuracy
+        # Method field
         if is_manual:
             embed.add_field(
                 name="🎯 Method",
-                value="Manual Store Selection",
+                value=f"Manual Store Selection\n(Selected: {selected_store})",
                 inline=True
             )
         else:
@@ -540,7 +530,7 @@ async def post_location_to_discord(location_data):
         # Footer with timestamp
         if is_manual:
             embed.set_footer(
-                text=f"Location Sharing System • Manual Check-In by {username}",
+                text=f"Location Sharing System • Store Selected by {username}",
                 icon_url="https://cdn.discordapp.com/emojis/899567722774564864.png"
             )
         else:
