@@ -124,6 +124,7 @@ STORES = [
 
 # Global state
 LOCATION_CHANNEL_ID = None
+LOCATION_USER_INFO = {}  # Store user info for location requests
 bot_ready = False
 bot_connected = False
 
@@ -269,20 +270,31 @@ async def ping(interaction: discord.Interaction):
 @bot.tree.command(name="location", description="Share your location with the team")
 async def location_command(interaction: discord.Interaction):
     """Location sharing command"""
-    global LOCATION_CHANNEL_ID
+    global LOCATION_CHANNEL_ID, LOCATION_USER_INFO
     
     try:
         LOCATION_CHANNEL_ID = interaction.channel.id
-        safe_print(f"Location command used in channel {LOCATION_CHANNEL_ID}")
+        
+        # Store user info for this location request
+        user_key = f"{interaction.channel.id}_{interaction.user.id}"
+        LOCATION_USER_INFO[user_key] = {
+            'user_id': interaction.user.id,
+            'username': interaction.user.display_name,
+            'full_username': str(interaction.user),
+            'avatar_url': interaction.user.display_avatar.url,
+            'timestamp': discord.utils.utcnow()
+        }
+        
+        safe_print(f"Location command used by {interaction.user.display_name} ({interaction.user.id}) in channel {LOCATION_CHANNEL_ID}")
         
         embed = discord.Embed(
             title="📍 Share Your Location",
-            description="Click the link below to share your location with the team!",
+            description=f"Hey {interaction.user.display_name}! Click the link below to share your location with the team!",
             color=0x5865F2
         )
         
         # Use the Railway URL
-        website_url = "https://web-production-f0220.up.railway.app"
+        website_url = f"https://web-production-f0220.up.railway.app?user={interaction.user.id}&channel={interaction.channel.id}"
         embed.add_field(
             name="🔗 Location Link",
             value=f"[Click here to share location]({website_url})",
@@ -316,8 +328,8 @@ async def location_command(interaction: discord.Interaction):
 
 # Location posting function
 async def post_location_to_discord(location_data):
-    """Post location update to Discord with beautiful styling"""
-    global LOCATION_CHANNEL_ID, bot_ready, bot_connected
+    """Post location update to Discord with beautiful styling and username"""
+    global LOCATION_CHANNEL_ID, bot_ready, bot_connected, LOCATION_USER_INFO
     
     try:
         if not bot_connected:
@@ -342,8 +354,37 @@ async def post_location_to_discord(location_data):
         accuracy = location_data.get('accuracy', 'Unknown')
         is_manual = location_data.get('isManualCheckIn', False)
         selected_store = location_data.get('selectedStore', None)
+        user_id = location_data.get('user_id', None)
         
-        safe_print(f"Processing location: {lat}, {lng}, manual: {is_manual}")
+        # Get user info
+        username = "Someone"
+        avatar_url = None
+        full_username = None
+        
+        if user_id:
+            # Try to get user info from stored data first
+            user_key = f"{LOCATION_CHANNEL_ID}_{user_id}"
+            if user_key in LOCATION_USER_INFO:
+                user_info = LOCATION_USER_INFO[user_key]
+                username = user_info['username']
+                full_username = user_info['full_username']
+                avatar_url = user_info['avatar_url']
+                safe_print(f"Using stored user info for {username}")
+            else:
+                # Try to fetch user from Discord
+                try:
+                    user = bot.get_user(int(user_id))
+                    if user:
+                        username = user.display_name
+                        full_username = str(user)
+                        avatar_url = user.display_avatar.url
+                        safe_print(f"Fetched user info for {username}")
+                    else:
+                        safe_print(f"Could not find user with ID {user_id}")
+                except Exception as e:
+                    safe_print(f"Error fetching user {user_id}: {e}")
+        
+        safe_print(f"Processing location for {username}: {lat}, {lng}, manual: {is_manual}")
         
         # Find closest store
         closest_store, distance = find_closest_store(lat, lng)
@@ -369,16 +410,30 @@ async def post_location_to_discord(location_data):
         else:
             indicator, status = get_status_indicator(distance)
         
-        # Create beautiful embed
+        # Create beautiful embed with username
+        if distance > 0:
+            title_text = f"{branding['emoji']} {username} is {distance:.1f} miles from {closest_store['name']}"
+            description_text = f"**{username}** is **{distance:.1f} miles** from {closest_store['name']}"
+        else:
+            title_text = f"{branding['emoji']} {username} checked in to {closest_store['name']}"
+            description_text = f"**{username}** checked in to **{closest_store['name']}**"
+        
         embed = discord.Embed(
-            title=f"{branding['emoji']} Location: {closest_store['name']}",
-            description=f"Someone is **{distance:.1f} miles** from {closest_store['name']}" if distance > 0 else f"Someone checked in to **{closest_store['name']}**",
+            title=title_text,
+            description=description_text,
             color=branding['color']
         )
         
         # Add store logo if available
         if branding['logo']:
             embed.set_thumbnail(url=branding['logo'])
+        
+        # Add user avatar if available
+        if avatar_url:
+            embed.set_author(
+                name=f"Location Update from {username}",
+                icon_url=avatar_url
+            )
         
         # Store information section
         embed.add_field(
@@ -420,17 +475,17 @@ async def post_location_to_discord(location_data):
             inline=True
         )
         
-        # Accuracy
-        if is_manual:
+        # User info field
+        if full_username:
             embed.add_field(
-                name="🎯 Method",
-                value="Manual Store Selection",
+                name="👤 User",
+                value=f"{username}\n(`{full_username}`)",
                 inline=True
             )
         else:
             embed.add_field(
-                name="🎯 Accuracy",
-                value=f"±{accuracy} meters",
+                name="👤 User",
+                value=username,
                 inline=True
             )
         
@@ -447,6 +502,20 @@ async def post_location_to_discord(location_data):
             value=f"**Lat:** {lat:.6f}\n**Lng:** {lng:.6f}",
             inline=True
         )
+        
+        # Accuracy
+        if is_manual:
+            embed.add_field(
+                name="🎯 Method",
+                value="Manual Store Selection",
+                inline=True
+            )
+        else:
+            embed.add_field(
+                name="🎯 Accuracy",
+                value=f"±{accuracy} meters",
+                inline=True
+            )
         
         # Google Maps link
         maps_url = f"https://maps.google.com/maps?q={lat},{lng}"
@@ -471,41 +540,18 @@ async def post_location_to_discord(location_data):
         # Footer with timestamp
         if is_manual:
             embed.set_footer(
-                text="Location Sharing System • Manual Check-In",
+                text=f"Location Sharing System • Manual Check-In by {username}",
                 icon_url="https://cdn.discordapp.com/emojis/899567722774564864.png"
             )
         else:
             embed.set_footer(
-                text="Location Sharing System • GPS Location",
+                text=f"Location Sharing System • GPS Location from {username}",
                 icon_url="https://cdn.discordapp.com/emojis/899567722774564864.png"
             )
         embed.timestamp = discord.utils.utcnow()
         
-        # Add visual border based on status
-        if status == "AT STORE":
-            if is_manual:
-                embed.set_author(
-                    name="✅ MANUAL CHECK-IN CONFIRMED",
-                    icon_url="https://cdn.discordapp.com/emojis/899567722774564864.png"
-                )
-            else:
-                embed.set_author(
-                    name="✅ CONFIRMED AT LOCATION",
-                    icon_url="https://cdn.discordapp.com/emojis/899567722774564864.png"
-                )
-        elif status == "NEARBY":
-            embed.set_author(
-                name="⚠️ NEARBY LOCATION",
-                icon_url="https://cdn.discordapp.com/emojis/899567722774564864.png"
-            )
-        else:
-            embed.set_author(
-                name="📍 LOCATION UPDATE",
-                icon_url="https://cdn.discordapp.com/emojis/899567722774564864.png"
-            )
-        
         await channel.send(embed=embed)
-        safe_print("✅ Successfully posted beautiful location to Discord")
+        safe_print(f"✅ Successfully posted beautiful location to Discord for {username}")
         return True
         
     except Exception as e:
@@ -515,8 +561,18 @@ async def post_location_to_discord(location_data):
 # Flask routes
 @app.route('/', methods=['GET'])
 def index():
-    """Serve the beautiful location sharing page"""
-    safe_print("Serving index page")
+    """Serve the beautiful location sharing page with user info"""
+    user_id = request.args.get('user')
+    channel_id = request.args.get('channel')
+    
+    safe_print(f"Serving index page for user {user_id} in channel {channel_id}")
+    
+    # Include user info in the page for JavaScript
+    user_info_js = json.dumps({
+        'user_id': user_id,
+        'channel_id': channel_id
+    }) if user_id and channel_id else 'null'
+    
     return '''
 <!DOCTYPE html>
 <html lang="en">
@@ -795,6 +851,9 @@ def index():
     </div>
 
     <script>
+        // User info passed from server
+        const USER_INFO = ''' + user_info_js + ''';
+        
         // Complete store database - same as bot.py
         const STORES = ''' + json.dumps(STORES) + ''';
 
@@ -915,14 +974,22 @@ def index():
         function selectStore(store) {
             showStatus('📍 Checking you in to ' + store.name + '...', 'info');
             
-            // Post the store's exact location to Discord
-            postLocationToDiscord({
+            // Create location data with user info
+            const locationData = {
                 latitude: store.lat,
                 longitude: store.lng,
                 accuracy: 10, // High accuracy since it's a selected store
                 selectedStore: store.name,
                 isManualCheckIn: true
-            });
+            };
+            
+            // Add user info if available
+            if (USER_INFO && USER_INFO.user_id) {
+                locationData.user_id = USER_INFO.user_id;
+            }
+            
+            // Post the store's exact location to Discord
+            postLocationToDiscord(locationData);
         }
 
         async function postLocationToDiscord(location) {
@@ -1003,12 +1070,20 @@ def index():
                     // Display nearby stores
                     displayNearbyStores(latitude, longitude);
                     
-                    // Post to Discord
-                    postLocationToDiscord({
+                    // Create location data with user info
+                    const locationData = {
                         latitude: latitude,
                         longitude: longitude,
                         accuracy: accuracy
-                    });
+                    };
+                    
+                    // Add user info if available
+                    if (USER_INFO && USER_INFO.user_id) {
+                        locationData.user_id = USER_INFO.user_id;
+                    }
+                    
+                    // Post to Discord
+                    postLocationToDiscord(locationData);
                     
                     button.innerHTML = '✅ Location Shared!';
                     button.style.background = 'linear-gradient(135deg, #48bb78, #38a169)';
@@ -1131,7 +1206,7 @@ def run_flask():
 # Main execution  
 def main():
     """Main function with better startup sequence"""
-    safe_print("=== Starting Beautiful Location Bot ===")
+    safe_print("=== Starting Beautiful Location Bot with Username Display ===")
     
     TOKEN = os.getenv('DISCORD_TOKEN')
     if not TOKEN:
