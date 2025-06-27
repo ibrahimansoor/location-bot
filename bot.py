@@ -126,7 +126,7 @@ def initialize_google_maps():
         gmaps = None
         return False
 
-def search_nearby_stores(lat, lng, radius_meters=8000):
+def search_nearby_stores(lat, lng, radius_meters=16000):
     """Search for Target, Walmart, Best Buy, and BJ's stores near location using Google Places"""
     if not gmaps:
         safe_print("❌ Google Maps API not available for real-time search")
@@ -135,37 +135,46 @@ def search_nearby_stores(lat, lng, radius_meters=8000):
     try:
         all_stores = []
         
-        # Define the store chains we want to find
+        # Define the store chains we want to find with multiple search terms
         store_queries = [
-            {"query": "Target store", "chain": "Target", "icon": "🎯"},
-            {"query": "Walmart", "chain": "Walmart", "icon": "🏪"},
-            {"query": "Best Buy", "chain": "Best Buy", "icon": "🔌"},
-            {"query": "BJ's Wholesale Club", "chain": "BJs", "icon": "🛒"}
+            {"query": "Target", "chain": "Target", "icon": "🎯", "keywords": ["Target", "Super Target"]},
+            {"query": "Walmart", "chain": "Walmart", "icon": "🏪", "keywords": ["Walmart", "Walmart Supercenter"]},
+            {"query": "Best Buy", "chain": "Best Buy", "icon": "🔌", "keywords": ["Best Buy"]},
+            {"query": "BJ's Wholesale Club", "chain": "BJs", "icon": "🛒", "keywords": ["BJ's", "BJs Wholesale", "BJ's Wholesale Club"]}
         ]
         
         location = (lat, lng)
         
         for store_info in store_queries:
             try:
-                safe_print(f"🔍 Searching for {store_info['query']} near {lat:.4f}, {lng:.4f}")
+                safe_print(f"🔍 Searching for {store_info['query']} within {radius_meters/1000:.1f}km of {lat:.4f}, {lng:.4f}")
                 
-                # Use Places API nearby search
-                places_result = gmaps.places_nearby(
-                    location=location,
-                    radius=radius_meters,
-                    keyword=store_info['query'],
-                    type='store'
-                )
-                
-                safe_print(f"📍 Found {len(places_result.get('results', []))} {store_info['chain']} locations")
-                
-                for place in places_result.get('results', []):
+                # Try multiple search approaches for better coverage
+                for keyword in store_info['keywords']:
                     try:
-                        place_lat = place['geometry']['location']['lat']
-                        place_lng = place['geometry']['location']['lng']
+                        # Use Places API nearby search
+                        places_result = gmaps.places_nearby(
+                            location=location,
+                            radius=radius_meters,
+                            keyword=keyword,
+                            type='store'
+                        )
                         
-                        # Calculate distance
-                        distance = calculate_distance(lat, lng, place_lat, place_lng)
+                        found_count = len(places_result.get('results', []))
+                        safe_print(f"📍 Found {found_count} {keyword} locations")
+                        
+                        for place in places_result.get('results', []):
+                            try:
+                                place_lat = place['geometry']['location']['lat']
+                                place_lng = place['geometry']['location']['lng']
+                                
+                                # Calculate distance
+                                distance = calculate_distance(lat, lng, place_lat, place_lng)
+                                
+                                # Skip if we already have this place (avoid duplicates)
+                                place_id = place['place_id']
+                                if any(store.get('place_id') == place_id for store in all_stores):
+                                    continue
                         
                         # Get detailed place information
                         place_details = gmaps.place(
@@ -173,7 +182,7 @@ def search_nearby_stores(lat, lng, radius_meters=8000):
                             fields=[
                                 'name', 'formatted_address', 'place_id', 'geometry', 
                                 'rating', 'user_ratings_total', 'formatted_phone_number',
-                                'opening_hours', 'website', 'price_level', 'types',
+                                'opening_hours', 'website', 'price_level',
                                 'business_status', 'plus_code'
                             ]
                         )
