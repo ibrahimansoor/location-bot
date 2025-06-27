@@ -577,7 +577,7 @@ def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 1
                                     'name', 'formatted_address', 'place_id', 'geometry', 
                                     'rating', 'user_ratings_total', 'formatted_phone_number',
                                     'opening_hours', 'website', 'business_status', 'price_level',
-                                    'types', 'vicinity'
+                                    'vicinity'
                                 ]
                             )
                             
@@ -613,7 +613,7 @@ def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 1
                                 'weekly_hours': weekly_hours,
                                 'business_status': business_status,
                                 'price_level': details.get('price_level'),
-                                'types': details.get('types', []),
+                                'types': place.get('types', []),
                                 'verified': 'google_places',
                                 'search_timestamp': datetime.utcnow().isoformat(),
                                 'search_radius': radius_meters,
