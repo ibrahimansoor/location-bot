@@ -116,6 +116,7 @@ STORE_ADDRESSES = [
     {"name": "Target Abington", "address": "385 Centre Ave, Abington, MA 02351", "chain": "Target"},
     {"name": "Target Boston Fenway", "address": "1341 Boylston St, Boston, MA 02215", "chain": "Target"},
     {"name": "Target Boston South Bay", "address": "250 Granite St, Boston, MA 02125", "chain": "Target"},
+    {"name": "Target Braintree", "address": "550 Grossman Dr, Braintree, MA 02184", "chain": "Target"},
     {"name": "Target Burlington", "address": "51 Middlesex Tpke, Burlington, MA 01803", "chain": "Target"},
     {"name": "Target Cambridge", "address": "180 Somerville Ave, Cambridge, MA 02143", "chain": "Target"},
     {"name": "Target Danvers", "address": "112 Endicott St, Danvers, MA 01923", "chain": "Target"},
@@ -685,6 +686,118 @@ async def history_command(interaction: discord.Interaction, limit: int = 10):
     except Exception as e:
         safe_print(f"History command error: {e}")
         await interaction.response.send_message("❌ Error retrieving location history")
+
+@bot.tree.command(name="fixstore", description="Fix incorrect store data (Admin only)")
+async def fixstore_command(interaction: discord.Interaction, old_name: str, new_name: str, new_address: str = None):
+    """Fix store data - for correcting things like 'Target Boston South Bay' to 'Target Braintree'"""
+    try:
+        if not check_user_permissions(interaction.user.id, 'admin'):
+            await interaction.response.send_message("❌ You need admin permissions to use this command.", ephemeral=True)
+            return
+        
+        # Find and update the store
+        with get_db_connection() as conn:
+            # Check if store exists
+            cursor = conn.execute('SELECT * FROM stores WHERE name = ?', (old_name,))
+            store = cursor.fetchone()
+            
+            if not store:
+                await interaction.response.send_message(f"❌ Store '{old_name}' not found in database.")
+                return
+            
+            # Update the store
+            if new_address:
+                conn.execute(
+                    'UPDATE stores SET name = ?, address = ? WHERE name = ?',
+                    (new_name, new_address, old_name)
+                )
+                message = f"✅ Updated store:\n**Old:** {old_name}\n**New:** {new_name}\n**New Address:** {new_address}"
+            else:
+                conn.execute(
+                    'UPDATE stores SET name = ? WHERE name = ?',
+                    (new_name, old_name)
+                )
+                message = f"✅ Updated store name:\n**Old:** {old_name}\n**New:** {new_name}"
+            
+            # Update location history records too
+            conn.execute(
+                'UPDATE user_locations SET store_name = ? WHERE store_name = ?',
+                (new_name, old_name)
+            )
+            
+        await interaction.response.send_message(message)
+        safe_print(f"Store data updated: {old_name} -> {new_name}")
+        
+    except Exception as e:
+        safe_print(f"Fix store command error: {e}")
+        await interaction.response.send_message("❌ Error updating store data")
+
+@bot.tree.command(name="regeocodestore", description="Re-geocode a store with Google Maps (Admin only)")
+async def regeocodestore_command(interaction: discord.Interaction, store_name: str):
+    """Re-geocode a specific store to get updated coordinates"""
+    try:
+        if not check_user_permissions(interaction.user.id, 'admin'):
+            await interaction.response.send_message("❌ You need admin permissions to use this command.", ephemeral=True)
+            return
+        
+        await interaction.response.defer()  # This might take a moment
+        
+        # Find the store
+        with get_db_connection() as conn:
+            cursor = conn.execute('SELECT * FROM stores WHERE name LIKE ?', (f'%{store_name}%',))
+            store = cursor.fetchone()
+            
+            if not store:
+                await interaction.followup.send(f"❌ Store matching '{store_name}' not found.")
+                return
+        
+        # Convert to dict for geocoding
+        store_data = {
+            'name': store['name'],
+            'address': store['address'],
+            'chain': store['chain']
+        }
+        
+        # Re-geocode
+        updated_store = geocode_store_address(store_data)
+        
+        embed = discord.Embed(
+            title=f"🗺️ Re-geocoded: {updated_store['name']}",
+            color=0x34A853 if updated_store['verified'] == 'google_api' else 0xFBBC04
+        )
+        
+        embed.add_field(
+            name="📍 New Coordinates",
+            value=f"{updated_store['lat']:.6f}, {updated_store['lng']:.6f}",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="✅ Verification",
+            value=updated_store['verified'],
+            inline=True
+        )
+        
+        if updated_store.get('formatted_address'):
+            embed.add_field(
+                name="🏠 Google Address",
+                value=updated_store['formatted_address'],
+                inline=False
+            )
+        
+        if updated_store.get('place_id'):
+            google_url = f"https://maps.google.com/maps/place/?q=place_id:{updated_store['place_id']}"
+            embed.add_field(
+                name="🗺️ Google Maps",
+                value=f"[View on Google Maps]({google_url})",
+                inline=False
+            )
+        
+        await interaction.followup.send(embed=embed)
+        
+    except Exception as e:
+        safe_print(f"Re-geocode command error: {e}")
+        await interaction.followup.send("❌ Error re-geocoding store")
 
 # Enhanced Flask routes with fixed Google Maps
 @app.route('/', methods=['GET'])
