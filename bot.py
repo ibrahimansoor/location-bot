@@ -1030,4 +1030,959 @@ async def ping_command(interaction: discord.Interaction):
         error_id = handle_error(e, "Ping command")
         await interaction.response.send_message(f"❌ Error checking bot status (ID: {error_id})")
 
-# Continue with more commands in the next part...
+# Enhanced Discord posting functions and additional components
+# Add this to your main bot.py file
+
+async def post_enhanced_location_to_discord(location_data):
+    """Enhanced Discord location posting with rich embeds and analytics"""
+    global LOCATION_CHANNEL_ID, bot_ready, bot_connected, LOCATION_USER_INFO
+    
+    try:
+        if not bot_connected or not bot_ready or not LOCATION_CHANNEL_ID:
+            safe_print("❌ Bot or channel not ready for posting")
+            return False
+        
+        channel = bot.get_channel(LOCATION_CHANNEL_ID)
+        if not channel:
+            safe_print(f"❌ Channel {LOCATION_CHANNEL_ID} not found")
+            return False
+        
+        lat = float(location_data['latitude'])
+        lng = float(location_data['longitude'])
+        selected_store_data = location_data.get('selectedStore', None)
+        user_id = location_data.get('user_id', None)
+        weather_data = location_data.get('weather', None)
+        session_id = location_data.get('session_id', None)
+        
+        if not selected_store_data:
+            safe_print("❌ No store data provided")
+            return False
+        
+        # Get user information
+        username = "Someone"
+        avatar_url = None
+        guild_name = channel.guild.name if channel.guild else "Direct Message"
+        
+        if user_id:
+            user_key = f"{LOCATION_CHANNEL_ID}_{user_id}"
+            if user_key in LOCATION_USER_INFO:
+                user_info = LOCATION_USER_INFO[user_key]
+                username = user_info['username']
+                avatar_url = user_info['avatar_url']
+        
+        # Extract store information
+        store_name = selected_store_data['name']
+        store_address = selected_store_data['address']
+        distance = selected_store_data['distance']
+        chain = selected_store_data['chain']
+        category = selected_store_data.get('category', 'Store')
+        rating = selected_store_data.get('rating')
+        rating_count = selected_store_data.get('rating_count')
+        place_id = selected_store_data.get('place_id')
+        phone = selected_store_data.get('phone')
+        website = selected_store_data.get('website')
+        is_open = selected_store_data.get('is_open')
+        price_level = selected_store_data.get('price_level')
+        quality_score = selected_store_data.get('quality_score', 0)
+        
+        # Get store branding
+        branding = get_enhanced_store_branding(chain, category, quality_score)
+        
+        # Create enhanced embed
+        embed = discord.Embed(
+            title=f"{branding['emoji']} {store_name}",
+            description=f"**{username}** checked in • **{distance:.1f} miles** away",
+            color=branding['color']
+        )
+        
+        # Set author with user avatar
+        if avatar_url:
+            embed.set_author(
+                name=f"{username}'s Enhanced Check-in",
+                icon_url=avatar_url
+            )
+        
+        # Store information section
+        store_info = f"**{branding['emoji']} {store_name}**\n"
+        store_info += f"{branding['description']}"
+        if category:
+            store_info += f" • {category}"
+        
+        embed.add_field(
+            name="🏪 Store Information",
+            value=store_info,
+            inline=True
+        )
+        
+        # Distance and status
+        distance_info = f"**{distance:.1f} miles** from {username}"
+        if is_open is not None:
+            status_emoji = "🟢 Open" if is_open else "🔴 Closed"
+            distance_info += f"\n{status_emoji}"
+        
+        embed.add_field(
+            name="📏 Location Status",
+            value=distance_info,
+            inline=True
+        )
+        
+        # Rating and reviews
+        if rating and rating_count:
+            rating_info = f"**{rating}/5** ⭐\n{rating_count:,} reviews"
+            if quality_score >= 7:
+                rating_info += "\n🏆 **Top Rated**"
+            elif quality_score >= 5:
+                rating_info += "\n🎯 **Popular Choice**"
+        else:
+            rating_info = "No ratings available"
+        
+        embed.add_field(
+            name="⭐ Customer Rating",
+            value=rating_info,
+            inline=True
+        )
+        
+        # Address with enhanced formatting
+        address_info = f"📍 {store_address}"
+        if phone:
+            # Format phone number nicely
+            formatted_phone = format_phone_number(phone)
+            address_info += f"\n📞 {formatted_phone}"
+        
+        embed.add_field(
+            name="📍 Address & Contact",
+            value=address_info,
+            inline=False
+        )
+        
+        # Weather information (if available)
+        if weather_data:
+            weather_info = f"{get_weather_icon(weather_data.get('icon', ''))} "
+            weather_info += f"**{weather_data['temperature']}°F** • {weather_data['description']}"
+            weather_info += f"\nFeels like {weather_data['feels_like']}°F • {weather_data['humidity']}% humidity"
+            
+            embed.add_field(
+                name="🌤️ Current Weather",
+                value=weather_info,
+                inline=True
+            )
+        
+        # Price level indicator
+        if price_level is not None:
+            price_indicators = ["💰 Budget", "💰💰 Moderate", "💰💰💰 Expensive", "💰💰💰💰 Very Expensive"]
+            if 0 <= price_level < len(price_indicators):
+                embed.add_field(
+                    name="💰 Price Level",
+                    value=price_indicators[price_level],
+                    inline=True
+                )
+        
+        # Quick action buttons (if supported)
+        action_buttons = []
+        
+        if place_id:
+            google_maps_url = f"https://maps.google.com/maps/place/?q=place_id:{place_id}"
+            action_buttons.append(f"[🗺️ View on Google Maps]({google_maps_url})")
+        
+        if website:
+            action_buttons.append(f"[🌐 Visit Website]({website})")
+        
+        # Directions link
+        directions_url = f"https://www.google.com/maps/dir/?api=1&destination={lat},{lng}"
+        action_buttons.append(f"[🧭 Get Directions]({directions_url})")
+        
+        if action_buttons:
+            embed.add_field(
+                name="🔗 Quick Actions",
+                value=" • ".join(action_buttons),
+                inline=False
+            )
+        
+        # Enhanced footer with session info
+        footer_text = "Enhanced Location Bot • Real-time Google Places Data"
+        if session_id:
+            footer_text += f" • Session: {session_id[:8]}..."
+        
+        embed.set_footer(text=footer_text)
+        embed.timestamp = discord.utils.utcnow()
+        
+        # Add thumbnail for high-quality stores
+        if quality_score >= 7:
+            # Use a trophy emoji as thumbnail for top-rated places
+            embed.set_thumbnail(url="https://cdn.discordapp.com/emojis/1234567890123456789.png")  # Replace with actual trophy emoji URL
+        
+        # Send the embed
+        message = await channel.send(embed=embed)
+        
+        # Add reactions for quick feedback
+        reactions = ["👍", "📍", "⭐"]
+        for reaction in reactions:
+            try:
+                await message.add_reaction(reaction)
+            except:
+                pass  # Ignore reaction failures
+        
+        # Update analytics
+        analytics_data = {
+            "store_name": store_name,
+            "store_category": category,
+            "distance": distance,
+            "rating": rating,
+            "has_weather": weather_data is not None,
+            "guild_name": guild_name,
+            "channel_name": channel.name,
+            "quality_score": quality_score
+        }
+        
+        log_analytics(
+            user_id,
+            "enhanced_location_posted",
+            analytics_data,
+            guild_id=channel.guild.id if channel.guild else None,
+            session_id=session_id
+        )
+        
+        safe_print(f"✅ Enhanced location posted to Discord for {username} at {store_name}")
+        return True
+        
+    except Exception as e:
+        error_id = handle_error(e, "Enhanced Discord posting")
+        safe_print(f"❌ Error posting to Discord: {error_id}")
+        return False
+
+def get_enhanced_store_branding(chain: str, category: str, quality_score: float) -> dict:
+    """Enhanced store branding with quality-based colors"""
+    
+    # Base branding map
+    branding_map = {
+        "Target": {"emoji": "🎯", "color": 0xCC0000, "description": "Department Store"},
+        "Walmart": {"emoji": "🏪", "color": 0x0071CE, "description": "Superstore"},
+        "Best Buy": {"emoji": "🔌", "color": 0x003F7F, "description": "Electronics Store"},
+        "BJs": {"emoji": "🛒", "color": 0xFF6B35, "description": "Wholesale Club"},
+        "Costco": {"emoji": "🏬", "color": 0x004B87, "description": "Warehouse Club"},
+        "Home Depot": {"emoji": "🔨", "color": 0xFF6600, "description": "Home Improvement"},
+        "Lowes": {"emoji": "🏠", "color": 0x004990, "description": "Home Improvement"},
+        "CVS": {"emoji": "💊", "color": 0xCC0000, "description": "Pharmacy"},
+        "Walgreens": {"emoji": "⚕️", "color": 0x0089CF, "description": "Pharmacy"},
+        "Starbucks": {"emoji": "☕", "color": 0x00704A, "description": "Coffee Shop"},
+        "Dunkin": {"emoji": "🍩", "color": 0xFF6600, "description": "Coffee & Donuts"},
+        "McDonalds": {"emoji": "🍟", "color": 0xFFCC00, "description": "Fast Food"},
+        "Shell": {"emoji": "⛽", "color": 0xFFDE00, "description": "Gas Station"},
+        "Mobil": {"emoji": "⛽", "color": 0xFF0000, "description": "Gas Station"},
+        "BofA": {"emoji": "🏦", "color": 0x012169, "description": "Bank"},
+        "TD Bank": {"emoji": "🏦", "color": 0x00B04F, "description": "Bank"},
+        "Chase": {"emoji": "🏦", "color": 0x005DAA, "description": "Bank"}
+    }
+    
+    # Default branding
+    default_branding = {
+        "emoji": get_category_emoji(category),
+        "color": get_category_color(category),
+        "description": f"{category} Store" if category else "Store"
+    }
+    
+    # Get base branding
+    branding = branding_map.get(chain, default_branding)
+    
+    # Enhance color based on quality score
+    if quality_score >= 8:
+        branding["color"] = 0xFFD700  # Gold for exceptional
+    elif quality_score >= 6:
+        branding["color"] = 0x32CD32  # Green for good
+    elif quality_score < 3:
+        branding["color"] = 0xFF6B6B  # Red for poor
+    
+    return branding
+
+def get_category_emoji(category: str) -> str:
+    """Get emoji for store category"""
+    category_emojis = {
+        "Department": "🏬", "Superstore": "🏪", "Electronics": "🔌",
+        "Wholesale": "🛒", "Hardware": "🔨", "Pharmacy": "💊",
+        "Grocery": "🥬", "Coffee": "☕", "Fast Food": "🍟",
+        "Gas": "⛽", "Banking": "🏦", "Auto": "🚗"
+    }
+    return category_emojis.get(category, "🏢")
+
+def get_category_color(category: str) -> int:
+    """Get color for store category"""
+    category_colors = {
+        "Department": 0x7289DA, "Superstore": 0x5865F2, "Electronics": 0x3498DB,
+        "Wholesale": 0x9B59B6, "Hardware": 0xE67E22, "Pharmacy": 0xE74C3C,
+        "Grocery": 0x2ECC71, "Coffee": 0x8B4513, "Fast Food": 0xF39C12,
+        "Gas": 0xF1C40F, "Banking": 0x34495E, "Auto": 0x95A5A6
+    }
+    return category_colors.get(category, 0x7289DA)
+
+def format_phone_number(phone: str) -> str:
+    """Format phone number for better display"""
+    # Remove all non-digit characters
+    digits = ''.join(filter(str.isdigit, phone))
+    
+    # Format US phone numbers
+    if len(digits) == 10:
+        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+    elif len(digits) == 11 and digits[0] == '1':
+        return f"+1 ({digits[1:4]}) {digits[4:7]}-{digits[7:]}"
+    else:
+        return phone  # Return original if not standard US format
+
+def get_weather_icon(icon_code: str) -> str:
+    """Get weather emoji from icon code"""
+    icon_map = {
+        '01d': '☀️', '01n': '🌙', '02d': '⛅', '02n': '☁️',
+        '03d': '☁️', '03n': '☁️', '04d': '☁️', '04n': '☁️',
+        '09d': '🌦️', '09n': '🌧️', '10d': '🌦️', '10n': '🌧️',
+        '11d': '⛈️', '11n': '⛈️', '13d': '❄️', '13n': '❄️',
+        '50d': '🌫️', '50n': '🌫️'
+    }
+    return icon_map.get(icon_code, '🌤️')
+
+# Additional Flask routes for enhanced functionality
+@app.route('/api/analytics', methods=['GET'])
+@limiter.limit("10 per minute")
+def api_analytics():
+    """Analytics API endpoint for admins"""
+    try:
+        user_id = request.args.get('user_id')
+        if not user_id or not check_user_permissions(user_id, 'admin'):
+            return jsonify({"error": "Admin permissions required"}), 403
+        
+        days = int(request.args.get('days', 7))
+        
+        with db_pool.get_connection() as conn:
+            # Usage statistics
+            usage_stats = conn.execute('''
+                SELECT action, COUNT(*) as count, DATE(timestamp) as date
+                FROM usage_analytics 
+                WHERE timestamp > datetime('now', '-{} days')
+                GROUP BY action, DATE(timestamp)
+                ORDER BY date DESC, count DESC
+            '''.format(days)).fetchall()
+            
+            # Popular stores
+            popular_stores = conn.execute('''
+                SELECT store_category, COUNT(*) as visits
+                FROM user_locations 
+                WHERE timestamp > datetime('now', '-{} days')
+                  AND store_category IS NOT NULL
+                GROUP BY store_category
+                ORDER BY visits DESC
+                LIMIT 10
+            '''.format(days)).fetchall()
+            
+            # Active users
+            active_users = conn.execute('''
+                SELECT COUNT(DISTINCT user_id) as count
+                FROM usage_analytics 
+                WHERE timestamp > datetime('now', '-{} days')
+            '''.format(days)).fetchone()['count']
+            
+            return jsonify({
+                "status": "success",
+                "analytics": {
+                    "active_users": active_users,
+                    "usage_stats": [dict(row) for row in usage_stats],
+                    "popular_stores": [dict(row) for row in popular_stores],
+                    "period_days": days
+                }
+            }), 200
+            
+    except Exception as e:
+        error_id = handle_error(e, "Analytics API")
+        return jsonify({"error": f"Internal server error (ID: {error_id})"}), 500
+
+@app.route('/api/sessions', methods=['GET', 'POST', 'DELETE'])
+@limiter.limit("15 per minute")
+def api_sessions():
+    """Location sessions management API"""
+    try:
+        if request.method == 'GET':
+            # Get active sessions
+            channel_id = request.args.get('channel_id')
+            if not channel_id:
+                return jsonify({"error": "Channel ID required"}), 400
+            
+            with db_pool.get_connection() as conn:
+                sessions = conn.execute('''
+                    SELECT ls.*, COUNT(sp.user_id) as participant_count
+                    FROM location_sessions ls
+                    LEFT JOIN session_participants sp ON ls.session_id = sp.session_id AND sp.is_active = 1
+                    WHERE ls.channel_id = ? AND ls.is_active = 1
+                    GROUP BY ls.session_id
+                    ORDER BY ls.created_at DESC
+                ''', (str(channel_id),)).fetchall()
+                
+                return jsonify({
+                    "status": "success",
+                    "sessions": [dict(row) for row in sessions]
+                }), 200
+        
+        elif request.method == 'POST':
+            # Join existing session
+            data = request.get_json()
+            if not data:
+                return jsonify({"error": "No data provided"}), 400
+            
+            session_id = data.get('session_id')
+            user_id = data.get('user_id')
+            
+            if not session_id or not user_id:
+                return jsonify({"error": "Session ID and User ID required"}), 400
+            
+            with db_pool.get_connection() as conn:
+                # Check if session exists and has space
+                session = conn.execute('''
+                    SELECT max_participants, 
+                           (SELECT COUNT(*) FROM session_participants 
+                            WHERE session_id = ? AND is_active = 1) as current_participants
+                    FROM location_sessions 
+                    WHERE session_id = ? AND is_active = 1
+                ''', (session_id, session_id)).fetchone()
+                
+                if not session:
+                    return jsonify({"error": "Session not found or inactive"}), 404
+                
+                if session['current_participants'] >= session['max_participants']:
+                    return jsonify({"error": "Session is full"}), 400
+                
+                # Add user to session
+                conn.execute('''
+                    INSERT OR REPLACE INTO session_participants 
+                    (session_id, user_id, is_active) 
+                    VALUES (?, ?, 1)
+                ''', (session_id, str(user_id)))
+                
+                log_analytics(
+                    user_id,
+                    "session_joined",
+                    {"session_id": session_id},
+                    request_obj=request
+                )
+                
+                return jsonify({"status": "success", "message": "Joined session"}), 200
+        
+        elif request.method == 'DELETE':
+            # Leave session
+            session_id = request.args.get('session_id')
+            user_id = request.args.get('user_id')
+            
+            if not session_id or not user_id:
+                return jsonify({"error": "Session ID and User ID required"}), 400
+            
+            with db_pool.get_connection() as conn:
+                conn.execute('''
+                    UPDATE session_participants 
+                    SET is_active = 0 
+                    WHERE session_id = ? AND user_id = ?
+                ''', (session_id, str(user_id)))
+                
+                log_analytics(
+                    user_id,
+                    "session_left",
+                    {"session_id": session_id},
+                    request_obj=request
+                )
+                
+                return jsonify({"status": "success", "message": "Left session"}), 200
+                
+    except Exception as e:
+        error_id = handle_error(e, "Sessions API")
+        return jsonify({"error": f"Internal server error (ID: {error_id})"}), 500
+
+@app.route('/api/store-details/<place_id>', methods=['GET'])
+@limiter.limit("30 per minute")
+def api_store_details(place_id):
+    """Get detailed store information"""
+    try:
+        if not gmaps:
+            return jsonify({"error": "Google Maps API not available"}), 503
+        
+        # Get place details
+        place_details = gmaps.place(
+            place_id=place_id,
+            fields=[
+                'name', 'formatted_address', 'place_id', 'geometry', 
+                'rating', 'user_ratings_total', 'formatted_phone_number',
+                'opening_hours', 'website', 'business_status', 'price_level',
+                'types', 'vicinity', 'photos', 'reviews'
+            ]
+        )
+        
+        details = place_details.get('result', {})
+        
+        # Format opening hours
+        opening_hours = details.get('opening_hours', {})
+        formatted_hours = []
+        if 'weekday_text' in opening_hours:
+            formatted_hours = opening_hours['weekday_text']
+        
+        # Get photo URLs (first 3 photos)
+        photo_urls = []
+        if 'photos' in details:
+            for photo in details['photos'][:3]:
+                try:
+                    photo_url = gmaps.places_photo(
+                        photo_reference=photo['photo_reference'],
+                        max_width=400
+                    )
+                    photo_urls.append(photo_url)
+                except:
+                    pass
+        
+        # Format reviews (first 3 reviews)
+        formatted_reviews = []
+        if 'reviews' in details:
+            for review in details['reviews'][:3]:
+                formatted_reviews.append({
+                    'author_name': review.get('author_name', 'Anonymous'),
+                    'rating': review.get('rating'),
+                    'text': review.get('text', '')[:200] + '...' if len(review.get('text', '')) > 200 else review.get('text', ''),
+                    'time_description': review.get('relative_time_description', '')
+                })
+        
+        enhanced_details = {
+            'place_id': place_id,
+            'name': details.get('name'),
+            'address': details.get('formatted_address'),
+            'phone': details.get('formatted_phone_number'),
+            'website': details.get('website'),
+            'rating': details.get('rating'),
+            'rating_count': details.get('user_ratings_total'),
+            'price_level': details.get('price_level'),
+            'business_status': details.get('business_status'),
+            'is_open': opening_hours.get('open_now'),
+            'opening_hours': formatted_hours,
+            'photos': photo_urls,
+            'reviews': formatted_reviews,
+            'types': details.get('types', [])
+        }
+        
+        return jsonify({
+            "status": "success",
+            "details": enhanced_details
+        }), 200
+        
+    except Exception as e:
+        error_id = handle_error(e, "Store details API")
+        return jsonify({"error": f"Internal server error (ID: {error_id})"}), 500
+
+@app.route('/health', methods=['GET'])
+def enhanced_health_check():
+    """Enhanced health check with detailed status"""
+    try:
+        health_status = {
+            "status": "healthy",
+            "timestamp": datetime.utcnow().isoformat(),
+            "services": {
+                "discord_bot": {
+                    "connected": bot_connected,
+                    "ready": bot_ready,
+                    "guilds": len(bot.guilds) if bot_connected else 0
+                },
+                "google_maps": {
+                    "available": gmaps is not None,
+                    "api_key_configured": bool(os.getenv('GOOGLE_MAPS_API_KEY'))
+                },
+                "weather": {
+                    "available": WEATHER_API_KEY is not None,
+                    "api_key_configured": bool(WEATHER_API_KEY)
+                },
+                "cache": {
+                    "type": "redis" if store_cache.redis_client else "memory",
+                    "connected": store_cache.redis_client is not None
+                }
+            },
+            "database": {
+                "accessible": False,
+                "response_time_ms": None
+            }
+        }
+        
+        # Test database connection
+        db_start = time.time()
+        try:
+            with db_pool.get_connection() as conn:
+                conn.execute('SELECT 1').fetchone()
+            
+            health_status["database"]["accessible"] = True
+            health_status["database"]["response_time_ms"] = round((time.time() - db_start) * 1000, 2)
+        except Exception as db_error:
+            health_status["database"]["error"] = str(db_error)
+            health_status["status"] = "degraded"
+        
+        # Overall health determination
+        critical_services = [
+            health_status["services"]["discord_bot"]["connected"],
+            health_status["database"]["accessible"]
+        ]
+        
+        if not all(critical_services):
+            health_status["status"] = "unhealthy"
+            return jsonify(health_status), 503
+        elif not health_status["services"]["google_maps"]["available"]:
+            health_status["status"] = "degraded"
+            return jsonify(health_status), 200
+        else:
+            return jsonify(health_status), 200
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }), 500
+
+@app.route('/metrics', methods=['GET'])
+def metrics():
+    """Prometheus metrics endpoint"""
+    try:
+        metrics_data = []
+        
+        # Bot metrics
+        metrics_data.append(f'discord_bot_connected {{}} {int(bot_connected)}')
+        metrics_data.append(f'discord_bot_ready {{}} {int(bot_ready)}')
+        metrics_data.append(f'discord_bot_guilds {{}} {len(bot.guilds) if bot_connected else 0}')
+        
+        # Service metrics
+        metrics_data.append(f'google_maps_available {{}} {int(gmaps is not None)}')
+        metrics_data.append(f'weather_api_available {{}} {int(WEATHER_API_KEY is not None)}')
+        metrics_data.append(f'redis_connected {{}} {int(store_cache.redis_client is not None)}')
+        
+        # Database metrics
+        try:
+            with db_pool.get_connection() as conn:
+                # Location count
+                location_count = conn.execute('SELECT COUNT(*) FROM user_locations').fetchone()[0]
+                metrics_data.append(f'total_locations {{}} {location_count}')
+                
+                # User count
+                user_count = conn.execute('SELECT COUNT(DISTINCT user_id) FROM user_locations').fetchone()[0]
+                metrics_data.append(f'total_users {{}} {user_count}')
+                
+                # Recent activity (last 24 hours)
+                recent_activity = conn.execute('''
+                    SELECT COUNT(*) FROM user_locations 
+                    WHERE timestamp > datetime('now', '-1 day')
+                ''').fetchone()[0]
+                metrics_data.append(f'recent_activity_24h {{}} {recent_activity}')
+                
+        except Exception as db_error:
+            metrics_data.append(f'database_error {{}} 1')
+        
+        return '\n'.join(metrics_data), 200, {'Content-Type': 'text/plain'}
+        
+    except Exception as e:
+        return f'error {{}} 1\n# Error: {str(e)}', 500, {'Content-Type': 'text/plain'}
+
+# Enhanced bot commands continuation
+@bot.tree.command(name="admin", description="Admin panel for bot management")
+async def admin_command(interaction: discord.Interaction, action: str = "status"):
+    """Enhanced admin command panel"""
+    try:
+        if not check_user_permissions(interaction.user.id, 'admin'):
+            await interaction.response.send_message("❌ Admin permissions required.", ephemeral=True)
+            return
+        
+        if action == "status":
+            # System status
+            embed = discord.Embed(
+                title="🔧 Admin System Status",
+                description="Enhanced Location Bot Administration Panel",
+                color=0x5865F2
+            )
+            
+            # Service status
+            services_status = []
+            services_status.append(f"🤖 Discord Bot: {'✅ Online' if bot_connected else '❌ Offline'}")
+            services_status.append(f"🗺️ Google Maps: {'✅ Active' if gmaps else '❌ Inactive'}")
+            services_status.append(f"🌤️ Weather API: {'✅ Active' if WEATHER_API_KEY else '❌ Inactive'}")
+            services_status.append(f"💾 Cache: {'✅ Redis' if store_cache.redis_client else '📝 Memory'}")
+            
+            embed.add_field(
+                name="🔧 System Services",
+                value="\n".join(services_status),
+                inline=True
+            )
+            
+            # Database stats
+            with db_pool.get_connection() as conn:
+                total_locations = conn.execute('SELECT COUNT(*) FROM user_locations').fetchone()[0]
+                total_users = conn.execute('SELECT COUNT(DISTINCT user_id) FROM user_locations').fetchone()[0]
+                recent_activity = conn.execute('''
+                    SELECT COUNT(*) FROM user_locations 
+                    WHERE timestamp > datetime('now', '-24 hours')
+                ''').fetchone()[0]
+            
+            db_stats = []
+            db_stats.append(f"📍 Total Locations: {total_locations:,}")
+            db_stats.append(f"👥 Total Users: {total_users:,}")
+            db_stats.append(f"📊 24h Activity: {recent_activity:,}")
+            
+            embed.add_field(
+                name="📊 Database Statistics",
+                value="\n".join(db_stats),
+                inline=True
+            )
+            
+            # Performance metrics
+            guild_count = len(bot.guilds)
+            cache_info = f"Type: {'Redis' if store_cache.redis_client else 'Memory'}"
+            if hasattr(store_cache, 'cache'):
+                cache_info += f"\nEntries: {len(store_cache.cache)}"
+            
+            perf_stats = []
+            perf_stats.append(f"🏢 Servers: {guild_count:,}")
+            perf_stats.append(f"💾 Cache: {cache_info}")
+            perf_stats.append(f"⚡ Latency: {bot.latency*1000:.1f}ms")
+            
+            embed.add_field(
+                name="⚡ Performance",
+                value="\n".join(perf_stats),
+                inline=False
+            )
+            
+        elif action == "cleanup":
+            # Database cleanup
+            await task_manager.cleanup_old_data()
+            embed = discord.Embed(
+                title="🧹 Database Cleanup",
+                description="✅ Database cleanup completed successfully!",
+                color=0x00FF00
+            )
+            
+        elif action == "cache":
+            # Cache management
+            if hasattr(store_cache, 'cache'):
+                cache_size = len(store_cache.cache)
+                store_cache.clear_expired()
+                new_cache_size = len(store_cache.cache)
+                
+                embed = discord.Embed(
+                    title="💾 Cache Management",
+                    description=f"Cache cleared: {cache_size - new_cache_size} expired entries removed",
+                    color=0x00FF00
+                )
+            else:
+                embed = discord.Embed(
+                    title="💾 Cache Management",
+                    description="Redis cache in use - automatic cleanup enabled",
+                    color=0x00FF00
+                )
+        
+        else:
+            available_actions = ["status", "cleanup", "cache"]
+            embed = discord.Embed(
+                title="❌ Invalid Action",
+                description=f"Available actions: {', '.join(available_actions)}",
+                color=0xFF6B6B
+            )
+        
+        embed.set_footer(text="Enhanced Location Bot Admin Panel")
+        embed.timestamp = discord.utils.utcnow()
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+        log_analytics(
+            interaction.user.id,
+            f"admin_{action}",
+            {"action": action},
+            guild_id=interaction.guild.id if interaction.guild else None
+        )
+        
+    except Exception as e:
+        error_id = handle_error(e, "Admin command")
+        await interaction.response.send_message(f"❌ Admin command error (ID: {error_id})", ephemeral=True)
+
+@bot.tree.command(name="export", description="Export your location data")
+async def export_command(interaction: discord.Interaction, format_type: str = "json"):
+    """Export user data command"""
+    try:
+        if format_type not in ["json", "csv"]:
+            await interaction.response.send_message("❌ Supported formats: json, csv", ephemeral=True)
+            return
+        
+        user_id = str(interaction.user.id)
+        
+        with db_pool.get_connection() as conn:
+            # Get user's location data
+            locations = conn.execute('''
+                SELECT timestamp, store_name, store_address, store_category, 
+                       distance, lat, lng, weather_data
+                FROM user_locations 
+                WHERE user_id = ? 
+                ORDER BY timestamp DESC
+                LIMIT 500
+            ''', (user_id,)).fetchall()
+            
+            # Get user's favorites
+            favorites = conn.execute('''
+                SELECT name, address, category, visit_count, created_at
+                FROM favorite_locations 
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+            ''', (user_id,)).fetchall()
+        
+        if not locations and not favorites:
+            await interaction.response.send_message("❌ No data found to export.", ephemeral=True)
+            return
+        
+        # Prepare export data
+        export_data = {
+            "user_id": user_id,
+            "export_date": datetime.utcnow().isoformat(),
+            "locations": [dict(row) for row in locations],
+            "favorites": [dict(row) for row in favorites],
+            "total_locations": len(locations),
+            "total_favorites": len(favorites)
+        }
+        
+        # Format based on requested type
+        if format_type == "json":
+            import json
+            file_content = json.dumps(export_data, indent=2, default=str)
+            file_name = f"location_data_{user_id}_{datetime.now().strftime('%Y%m%d')}.json"
+            content_type = "application/json"
+        else:  # CSV
+            import csv
+            import io
+            
+            output = io.StringIO()
+            writer = csv.writer(output)
+            
+            # Write locations
+            writer.writerow(["Type", "Timestamp", "Name", "Address", "Category", "Distance", "Latitude", "Longitude"])
+            for location in locations:
+                writer.writerow([
+                    "Location", location['timestamp'], location['store_name'],
+                    location['store_address'], location['store_category'],
+                    location['distance'], location['lat'], location['lng']
+                ])
+            
+            # Write favorites
+            for favorite in favorites:
+                writer.writerow([
+                    "Favorite", favorite['created_at'], favorite['name'],
+                    favorite['address'], favorite['category'], "", "", ""
+                ])
+            
+            file_content = output.getvalue()
+            file_name = f"location_data_{user_id}_{datetime.now().strftime('%Y%m%d')}.csv"
+            content_type = "text/csv"
+        
+        # Create file and send
+        file_data = io.BytesIO(file_content.encode('utf-8'))
+        discord_file = discord.File(file_data, filename=file_name)
+        
+        embed = discord.Embed(
+            title="📄 Data Export Complete",
+            description=f"Your location data has been exported in {format_type.upper()} format.",
+            color=0x00FF00
+        )
+        
+        embed.add_field(name="📊 Export Summary", value=f"• {len(locations)} location records\n• {len(favorites)} favorite locations", inline=False)
+        embed.set_footer(text="Your data export is attached to this message")
+        
+        await interaction.response.send_message(embed=embed, file=discord_file, ephemeral=True)
+        
+        log_analytics(
+            interaction.user.id,
+            "data_exported",
+            {"format": format_type, "location_count": len(locations), "favorites_count": len(favorites)},
+            guild_id=interaction.guild.id if interaction.guild else None
+        )
+        
+    except Exception as e:
+        error_id = handle_error(e, "Export command")
+        await interaction.response.send_message(f"❌ Export failed (ID: {error_id})", ephemeral=True)
+
+# Add more bot event handlers for comprehensive monitoring
+@bot.event
+async def on_command_error(ctx, error):
+    """Enhanced error handling for bot commands"""
+    error_id = handle_error(error, f"Command error: {ctx.command}")
+    
+    embed = discord.Embed(
+        title="❌ Command Error",
+        description=f"An error occurred while processing your command.\n**Error ID:** `{error_id}`",
+        color=0xFF6B6B
+    )
+    
+    try:
+        await ctx.send(embed=embed, ephemeral=True)
+    except:
+        pass  # Ignore if we can't send the error message
+
+@bot.event
+async def on_application_command_error(interaction, error):
+    """Enhanced error handling for slash commands"""
+    error_id = handle_error(error, f"Slash command error: {interaction.command}")
+    
+    embed = discord.Embed(
+        title="❌ Command Error",
+        description=f"An error occurred while processing your command.\n**Error ID:** `{error_id}`",
+        color=0xFF6B6B
+    )
+    
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+    except:
+        pass  # Ignore if we can't send the error message
+
+# Performance monitoring function
+async def monitor_performance():
+    """Background task for performance monitoring"""
+    while True:
+        try:
+            # Monitor memory usage
+            import psutil
+            process = psutil.Process()
+            memory_usage = process.memory_info().rss / 1024 / 1024  # MB
+            
+            # Monitor database performance
+            db_start = time.time()
+            with db_pool.get_connection() as conn:
+                conn.execute('SELECT 1').fetchone()
+            db_response_time = (time.time() - db_start) * 1000
+            
+            # Log performance metrics
+            performance_data = {
+                "memory_usage_mb": memory_usage,
+                "database_response_ms": db_response_time,
+                "bot_latency_ms": bot.latency * 1000 if bot_connected else None,
+                "guild_count": len(bot.guilds) if bot_connected else 0
+            }
+            
+            log_analytics(
+                None,
+                "performance_metrics",
+                performance_data
+            )
+            
+            # Alert if performance is degraded
+            if memory_usage > 512 or db_response_time > 1000:
+                safe_print(f"⚠️ Performance alert: Memory: {memory_usage:.1f}MB, DB: {db_response_time:.1f}ms")
+            
+        except Exception as e:
+            handle_error(e, "Performance monitoring")
+        
+        # Wait 5 minutes before next check
+        await asyncio.sleep(300)
+
+# Start performance monitoring when bot is ready
+@tasks.loop(count=1)
+async def start_performance_monitoring():
+    """Start performance monitoring task"""
+    if bot_ready:
+        asyncio.create_task(monitor_performance())
+
+@start_performance_monitoring.before_loop
+async def before_performance_monitoring():
+    """Wait for bot to be ready before starting monitoring"""
+    await bot.wait_until_ready()
+
+# Initialize monitoring
+start_performance_monitoring.start()
