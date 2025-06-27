@@ -1,10 +1,12 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import os
 import math
 import asyncio
 import json
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template_string
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import threading
 import time
 import sys
@@ -13,84 +15,456 @@ import googlemaps
 from datetime import datetime, timedelta
 import sqlite3
 from contextlib import contextmanager
+import logging
+from logging.handlers import RotatingFileHandler
+import uuid
+import hashlib
+from typing import List, Dict, Optional, Tuple
+from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+import redis
+import pickle
+from marshmallow import Schema, fields, validate, ValidationError
+import heapq
+from collections import defaultdict
 
-# Flask app
+# Enhanced Flask app with rate limiting
 app = Flask(__name__)
+limiter = Limiter(
+    app,
+    key_func=get_remote_address,
+    default_limits=["500 per day", "100 per hour"],
+    storage_uri="memory://"
+)
 
-# Bot setup
+# Enhanced bot setup
 intents = discord.Intents.default()
 intents.message_content = True
+intents.guilds = True
+intents.guild_messages = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# Google Maps client
+# Google Maps and Weather clients
 gmaps = None
+WEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY')
 
-# Database setup
-DATABASE_PATH = 'location_bot.db'
+# Enhanced database configuration
+DATABASE_PATH = 'enhanced_location_bot.db'
+CACHE_ENABLED = os.getenv('REDIS_URL') is not None
+
+# Enhanced logging setup
+def setup_enhanced_logging():
+    """Setup comprehensive logging system"""
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s'
+    )
+    
+    # File handler with rotation
+    file_handler = RotatingFileHandler(
+        'location_bot.log', 
+        maxBytes=50*1024*1024,  # 50MB
+        backupCount=10
+    )
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(logging.INFO)
+    
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(logging.INFO)
+    
+    # Setup logger
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    return logger
+
+logger = setup_enhanced_logging()
 
 def safe_print(msg):
-    """Safe printing for Railway logs"""
+    """Enhanced safe printing with logging"""
+    timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    formatted_msg = f"[BOT] {timestamp} {msg}"
     try:
-        print(f"[BOT] {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} {msg}")
+        print(formatted_msg)
         sys.stdout.flush()
-    except:
-        pass
-
-@contextmanager
-def get_db_connection():
-    """Database connection context manager"""
-    conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-        conn.commit()
+        logger.info(msg)
     except Exception as e:
-        conn.rollback()
-        safe_print(f"Database error: {e}")
-        raise
-    finally:
-        conn.close()
+        logger.error(f"Logging error: {e}")
 
-def init_database():
-    """Initialize SQLite database"""
-    with get_db_connection() as conn:
-        # User locations table
+def handle_error(error, context="Unknown"):
+    """Enhanced error handling with unique IDs"""
+    error_id = str(uuid.uuid4())[:8]
+    error_msg = f"[{error_id}] {context}: {str(error)}"
+    
+    logger.error(error_msg, exc_info=True)
+    safe_print(f"❌ Error {error_id}: {context}")
+    
+    return error_id
+
+# Enhanced caching system
+class EnhancedLocationCache:
+    """Redis-backed cache with fallback to in-memory"""
+    
+    def __init__(self, default_ttl=1800):
+        self.default_ttl = default_ttl
+        self.memory_cache = {}
+        self.redis_client = None
+        
+        if CACHE_ENABLED:
+            try:
+                redis_url = os.getenv('REDIS_URL')
+                self.redis_client = redis.from_url(redis_url)
+                self.redis_client.ping()
+                safe_print("✅ Redis cache connected")
+            except Exception as e:
+                safe_print(f"⚠️ Redis connection failed, using memory cache: {e}")
+    
+    def _get_cache_key(self, lat: float, lng: float, radius: int, category: str = None) -> str:
+        rounded_lat = round(lat, 3)
+        rounded_lng = round(lng, 3)
+        base_key = f"stores:{rounded_lat}:{rounded_lng}:{radius}"
+        return f"{base_key}:{category}" if category else base_key
+    
+    def get(self, lat: float, lng: float, radius: int, category: str = None) -> Optional[List[Dict]]:
+        key = self._get_cache_key(lat, lng, radius, category)
+        
+        try:
+            if self.redis_client:
+                cached_data = self.redis_client.get(key)
+                if cached_data:
+                    safe_print(f"📋 Redis cache HIT for {key}")
+                    return pickle.loads(cached_data)
+            else:
+                # Fallback to memory cache
+                if key in self.memory_cache:
+                    data, expiry = self.memory_cache[key]
+                    if datetime.now() < expiry:
+                        safe_print(f"📋 Memory cache HIT for {key}")
+                        return data
+                    else:
+                        del self.memory_cache[key]
+        except Exception as e:
+            handle_error(e, "Cache get operation")
+        
+        return None
+    
+    def set(self, lat: float, lng: float, radius: int, data: List[Dict], category: str = None, ttl: Optional[int] = None) -> None:
+        key = self._get_cache_key(lat, lng, radius, category)
+        cache_ttl = ttl or self.default_ttl
+        
+        try:
+            if self.redis_client:
+                self.redis_client.setex(key, cache_ttl, pickle.dumps(data))
+                safe_print(f"💾 Cached {len(data)} items to Redis: {key}")
+            else:
+                # Fallback to memory cache
+                expiry = datetime.now() + timedelta(seconds=cache_ttl)
+                self.memory_cache[key] = (data, expiry)
+                safe_print(f"💾 Cached {len(data)} items to memory: {key}")
+        except Exception as e:
+            handle_error(e, "Cache set operation")
+    
+    def clear_expired(self) -> None:
+        """Clean up expired memory cache entries"""
+        if not self.redis_client and self.memory_cache:
+            now = datetime.now()
+            expired_keys = [k for k, (_, expiry) in self.memory_cache.items() if now >= expiry]
+            for key in expired_keys:
+                del self.memory_cache[key]
+            if expired_keys:
+                safe_print(f"🧹 Cleared {len(expired_keys)} expired cache entries")
+
+# Global cache instance
+store_cache = EnhancedLocationCache()
+
+# Input validation schemas
+class LocationSchema(Schema):
+    latitude = fields.Float(required=True, validate=validate.Range(min=-90, max=90))
+    longitude = fields.Float(required=True, validate=validate.Range(min=-180, max=180))
+    user_id = fields.String(required=True, validate=validate.Length(min=1, max=25))
+    accuracy = fields.Float(missing=None, validate=validate.Range(min=0))
+
+class StoreSearchSchema(Schema):
+    latitude = fields.Float(required=True, validate=validate.Range(min=-90, max=90))
+    longitude = fields.Float(required=True, validate=validate.Range(min=-180, max=180))
+    radius = fields.Integer(missing=16000, validate=validate.Range(min=100, max=50000))
+    category = fields.String(missing=None)
+    user_id = fields.String(required=True)
+
+def validate_input(schema_class, data):
+    """Validate input data against schema"""
+    schema = schema_class()
+    try:
+        return schema.load(data)
+    except ValidationError as err:
+        raise ValueError(f"Invalid input: {err.messages}")
+
+# Enhanced database connection pool
+class DatabasePool:
+    def __init__(self, database_path, pool_size=10):
+        self.database_path = database_path
+        self.pool_size = pool_size
+        self.connections = []
+        self.lock = threading.Lock()
+        self._init_pool()
+    
+    def _init_pool(self):
+        for _ in range(self.pool_size):
+            conn = sqlite3.connect(
+                self.database_path, 
+                check_same_thread=False,
+                timeout=30.0
+            )
+            conn.row_factory = sqlite3.Row
+            conn.execute('PRAGMA journal_mode=WAL')
+            conn.execute('PRAGMA synchronous=NORMAL')
+            conn.execute('PRAGMA cache_size=10000')
+            self.connections.append(conn)
+    
+    @contextmanager
+    def get_connection(self):
+        with self.lock:
+            if self.connections:
+                conn = self.connections.pop()
+            else:
+                conn = sqlite3.connect(
+                    self.database_path,
+                    check_same_thread=False,
+                    timeout=30.0
+                )
+                conn.row_factory = sqlite3.Row
+        
+        try:
+            yield conn
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            handle_error(e, "Database operation")
+            raise
+        finally:
+            with self.lock:
+                if len(self.connections) < self.pool_size:
+                    self.connections.append(conn)
+                else:
+                    conn.close()
+
+db_pool = DatabasePool(DATABASE_PATH)
+
+def init_enhanced_database():
+    """Initialize enhanced database schema"""
+    with db_pool.get_connection() as conn:
+        # Enhanced user locations table
         conn.execute('''
             CREATE TABLE IF NOT EXISTS user_locations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id TEXT NOT NULL,
                 channel_id TEXT NOT NULL,
+                guild_id TEXT,
                 lat REAL NOT NULL,
                 lng REAL NOT NULL,
                 accuracy REAL,
                 store_name TEXT,
                 store_address TEXT,
                 store_place_id TEXT,
+                store_category TEXT,
                 distance REAL,
+                weather_data TEXT,
+                visit_duration INTEGER,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                is_real_time BOOLEAN DEFAULT FALSE
+                is_real_time BOOLEAN DEFAULT FALSE,
+                session_id TEXT,
+                
+                INDEX idx_user_timestamp (user_id, timestamp),
+                INDEX idx_location (lat, lng),
+                INDEX idx_store_category (store_category)
             )
         ''')
         
-        # User permissions table
+        # Enhanced user permissions
         conn.execute('''
             CREATE TABLE IF NOT EXISTS user_permissions (
                 user_id TEXT PRIMARY KEY,
                 role TEXT NOT NULL DEFAULT 'user',
                 server_id TEXT,
+                permissions TEXT,  -- JSON string of additional permissions
                 granted_by TEXT,
-                granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # User favorites
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS favorite_locations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                lat REAL NOT NULL,
+                lng REAL NOT NULL,
+                address TEXT,
+                category TEXT,
+                notes TEXT,
+                visit_count INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                
+                INDEX idx_user_favorites (user_id),
+                INDEX idx_category (category)
+            )
+        ''')
+        
+        # Analytics table
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS usage_analytics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                guild_id TEXT,
+                action TEXT NOT NULL,
+                data TEXT,  -- JSON data
+                ip_address TEXT,
+                user_agent TEXT,
+                session_id TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                
+                INDEX idx_action_timestamp (action, timestamp),
+                INDEX idx_user_analytics (user_id, timestamp)
+            )
+        ''')
+        
+        # Location sharing sessions
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS location_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT UNIQUE NOT NULL,
+                channel_id TEXT NOT NULL,
+                guild_id TEXT,
+                created_by TEXT NOT NULL,
+                session_name TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                max_participants INTEGER DEFAULT 10,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP,
+                
+                INDEX idx_session_channel (channel_id, is_active)
+            )
+        ''')
+        
+        # Session participants
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS session_participants (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_location_update TIMESTAMP,
+                is_active BOOLEAN DEFAULT TRUE,
+                
+                UNIQUE(session_id, user_id),
+                INDEX idx_session_participants (session_id, is_active)
+            )
+        ''')
+        
+        # Store cache table (persistent cache)
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS store_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cache_key TEXT UNIQUE NOT NULL,
+                location_lat REAL NOT NULL,
+                location_lng REAL NOT NULL,
+                radius INTEGER NOT NULL,
+                category TEXT,
+                store_data TEXT NOT NULL,  -- JSON
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                
+                INDEX idx_location_cache (location_lat, location_lng, radius),
+                INDEX idx_cache_expiry (expires_at)
             )
         ''')
 
-# Global state
-LOCATION_CHANNEL_ID = None
-LOCATION_USER_INFO = {}
-bot_ready = False
-bot_connected = False
+# Comprehensive store database
+@dataclass
+class StoreConfig:
+    query: str
+    chain: str
+    icon: str
+    category: str
+    priority: int
+    search_terms: List[str] = None
+
+def get_comprehensive_store_database():
+    """Enhanced store database with detailed configurations"""
+    return [
+        # Department Stores (Priority 1)
+        StoreConfig("Target", "Target", "🎯", "Department", 1, ["Target", "Target Store"]),
+        StoreConfig("Walmart", "Walmart", "🏪", "Superstore", 1, ["Walmart", "Walmart Supercenter"]),
+        StoreConfig("Macy's", "Macys", "👗", "Department", 2, ["Macy's", "Macys"]),
+        StoreConfig("Nordstrom", "Nordstrom", "👔", "Department", 2, ["Nordstrom"]),
+        StoreConfig("Kohl's", "Kohls", "🛍️", "Department", 2, ["Kohl's", "Kohls"]),
+        
+        # Electronics (Priority 1-2)
+        StoreConfig("Best Buy", "Best Buy", "🔌", "Electronics", 1, ["Best Buy"]),
+        StoreConfig("Apple Store", "Apple", "📱", "Electronics", 2, ["Apple Store", "Apple"]),
+        StoreConfig("GameStop", "GameStop", "🎮", "Electronics", 3, ["GameStop"]),
+        StoreConfig("Micro Center", "Micro Center", "💻", "Electronics", 2, ["Micro Center"]),
+        
+        # Wholesale/Warehouse (Priority 1-2)
+        StoreConfig("BJ's Wholesale Club", "BJs", "🛒", "Wholesale", 1, ["BJ's", "BJs"]),
+        StoreConfig("Costco", "Costco", "🏬", "Wholesale", 1, ["Costco"]),
+        StoreConfig("Sam's Club", "Sams Club", "🛍️", "Wholesale", 2, ["Sam's Club", "Sams"]),
+        
+        # Hardware/Home Improvement (Priority 1-2)
+        StoreConfig("Home Depot", "Home Depot", "🔨", "Hardware", 1, ["Home Depot", "The Home Depot"]),
+        StoreConfig("Lowe's", "Lowes", "🏠", "Hardware", 1, ["Lowe's", "Lowes"]),
+        StoreConfig("Menards", "Menards", "🔧", "Hardware", 2, ["Menards"]),
+        StoreConfig("Harbor Freight", "Harbor Freight", "⚒️", "Hardware", 3, ["Harbor Freight"]),
+        
+        # Pharmacies (Priority 1-2)
+        StoreConfig("CVS Pharmacy", "CVS", "💊", "Pharmacy", 1, ["CVS", "CVS Pharmacy"]),
+        StoreConfig("Walgreens", "Walgreens", "⚕️", "Pharmacy", 1, ["Walgreens"]),
+        StoreConfig("Rite Aid", "Rite Aid", "🏥", "Pharmacy", 2, ["Rite Aid"]),
+        
+        # Grocery (Priority 1-3)
+        StoreConfig("Stop & Shop", "Stop & Shop", "🛒", "Grocery", 1, ["Stop & Shop", "Stop and Shop"]),
+        StoreConfig("Market Basket", "Market Basket", "🥬", "Grocery", 1, ["Market Basket"]),
+        StoreConfig("Whole Foods", "Whole Foods", "🥗", "Grocery", 2, ["Whole Foods", "Whole Foods Market"]),
+        StoreConfig("Trader Joe's", "Trader Joes", "🌽", "Grocery", 2, ["Trader Joe's", "Trader Joes"]),
+        StoreConfig("Shaw's", "Shaws", "🥕", "Grocery", 2, ["Shaw's", "Shaws"]),
+        StoreConfig("Big Y", "Big Y", "🍎", "Grocery", 3, ["Big Y"]),
+        
+        # Coffee & Fast Food (Priority 1-3)
+        StoreConfig("Starbucks", "Starbucks", "☕", "Coffee", 1, ["Starbucks"]),
+        StoreConfig("Dunkin'", "Dunkin", "🍩", "Coffee", 1, ["Dunkin'", "Dunkin Donuts"]),
+        StoreConfig("McDonald's", "McDonalds", "🍟", "Fast Food", 1, ["McDonald's", "McDonalds"]),
+        StoreConfig("Subway", "Subway", "🥪", "Fast Food", 2, ["Subway"]),
+        StoreConfig("Burger King", "Burger King", "🍔", "Fast Food", 2, ["Burger King"]),
+        StoreConfig("Taco Bell", "Taco Bell", "🌮", "Fast Food", 3, ["Taco Bell"]),
+        
+        # Gas Stations (Priority 1-3)
+        StoreConfig("Shell", "Shell", "⛽", "Gas", 1, ["Shell", "Shell Gas"]),
+        StoreConfig("Mobil", "Mobil", "⛽", "Gas", 1, ["Mobil", "Exxon Mobil"]),
+        StoreConfig("Gulf", "Gulf", "⛽", "Gas", 2, ["Gulf"]),
+        StoreConfig("Citgo", "Citgo", "⛽", "Gas", 2, ["Citgo"]),
+        StoreConfig("Cumberland Farms", "Cumberland", "⛽", "Gas", 2, ["Cumberland Farms", "Cumbys"]),
+        
+        # Banking (Priority 1-3)
+        StoreConfig("Bank of America", "BofA", "🏦", "Banking", 1, ["Bank of America", "BofA"]),
+        StoreConfig("TD Bank", "TD Bank", "🏦", "Banking", 1, ["TD Bank"]),
+        StoreConfig("Citizens Bank", "Citizens", "🏦", "Banking", 2, ["Citizens Bank"]),
+        StoreConfig("Wells Fargo", "Wells Fargo", "🏦", "Banking", 2, ["Wells Fargo"]),
+        StoreConfig("Chase Bank", "Chase", "🏦", "Banking", 1, ["Chase", "JPMorgan Chase"]),
+        
+        # Auto/Service (Priority 2-3)
+        StoreConfig("AutoZone", "AutoZone", "🔧", "Auto", 2, ["AutoZone"]),
+        StoreConfig("Jiffy Lube", "Jiffy Lube", "🛠️", "Auto", 3, ["Jiffy Lube"]),
+        StoreConfig("Valvoline", "Valvoline", "🛢️", "Auto", 3, ["Valvoline Instant Oil"]),
+    ]
 
 def initialize_google_maps():
-    """Initialize Google Maps client"""
+    """Enhanced Google Maps initialization"""
     global gmaps
     
     api_key = os.getenv('GOOGLE_MAPS_API_KEY')
@@ -101,11 +475,23 @@ def initialize_google_maps():
     try:
         gmaps = googlemaps.Client(key=api_key)
         
-        # Test the API key
-        test_result = gmaps.geocode("Boston, MA")
+        # Test the API key with a simple request
+        test_result = gmaps.geocode("Boston, MA", region="us")
         if test_result:
             safe_print("✅ Google Maps API initialized successfully")
-            return True
+            
+            # Test Places API
+            try:
+                places_result = gmaps.places_nearby(
+                    location=(42.3601, -71.0589),
+                    radius=1000,
+                    keyword="store"
+                )
+                safe_print("✅ Google Places API verified")
+                return True
+            except Exception as places_error:
+                safe_print(f"⚠️ Google Places API issue: {places_error}")
+                return True  # Geocoding works, continue anyway
         else:
             safe_print("❌ Google Maps API key validation failed")
             return False
@@ -115,8 +501,47 @@ def initialize_google_maps():
         gmaps = None
         return False
 
-def search_nearby_stores(lat, lng, radius_meters=16000):
-    """Search for stores using Google Places API"""
+async def get_weather_data(lat: float, lng: float) -> Optional[Dict]:
+    """Get weather data for location"""
+    if not WEATHER_API_KEY:
+        return None
+    
+    try:
+        url = "http://api.openweathermap.org/data/2.5/weather"
+        params = {
+            'lat': lat,
+            'lon': lng,
+            'appid': WEATHER_API_KEY,
+            'units': 'imperial'  # Fahrenheit for US users
+        }
+        
+        response = requests.get(url, params=params, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                'temperature': round(data['main']['temp']),
+                'feels_like': round(data['main']['feels_like']),
+                'description': data['weather'][0]['description'].title(),
+                'humidity': data['main']['humidity'],
+                'icon': data['weather'][0]['icon'],
+                'visibility': data.get('visibility', 0) / 1000,  # Convert to miles
+                'wind_speed': data.get('wind', {}).get('speed', 0),
+                'timestamp': datetime.utcnow().isoformat()
+            }
+    except Exception as e:
+        handle_error(e, "Weather API request")
+    
+    return None
+
+def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 16000, 
+                                 category: str = None, max_stores_per_type: int = 4) -> List[Dict]:
+    """Enhanced store search with comprehensive coverage and caching"""
+    
+    # Check cache first
+    cached_result = store_cache.get(lat, lng, radius_meters, category)
+    if cached_result:
+        return cached_result
+    
     if not gmaps:
         safe_print("❌ Google Maps API not available")
         return []
@@ -124,94 +549,225 @@ def search_nearby_stores(lat, lng, radius_meters=16000):
     try:
         all_stores = []
         location = (lat, lng)
+        store_configs = get_comprehensive_store_database()
         
-        # Store types to search for
-        store_queries = [
-            {"query": "Target", "chain": "Target", "icon": "🎯"},
-            {"query": "Walmart", "chain": "Walmart", "icon": "🏪"},
-            {"query": "Best Buy", "chain": "Best Buy", "icon": "🔌"},
-            {"query": "BJ's Wholesale Club", "chain": "BJs", "icon": "🛒"}
-        ]
+        # Filter by category if specified
+        if category:
+            store_configs = [s for s in store_configs if s.category.lower() == category.lower()]
         
-        for store_info in store_queries:
-            try:
-                safe_print(f"🔍 Searching for {store_info['query']}")
-                
-                # Search for nearby places
-                places_result = gmaps.places_nearby(
-                    location=location,
-                    radius=radius_meters,
-                    keyword=store_info['query'],
-                    type='store'
-                )
-                
-                found_count = len(places_result.get('results', []))
-                safe_print(f"📍 Found {found_count} {store_info['chain']} locations")
-                
-                for place in places_result.get('results', []):
-                    try:
-                        place_lat = place['geometry']['location']['lat']
-                        place_lng = place['geometry']['location']['lng']
-                        distance = calculate_distance(lat, lng, place_lat, place_lng)
-                        
-                        # Get detailed place information
-                        place_details = gmaps.place(
-                            place_id=place['place_id'],
-                            fields=[
-                                'name', 'formatted_address', 'place_id', 'geometry', 
-                                'rating', 'user_ratings_total', 'formatted_phone_number',
-                                'opening_hours', 'website', 'business_status'
-                            ]
-                        )
-                        
-                        details = place_details.get('result', {})
-                        
-                        # Check opening hours
-                        opening_hours = details.get('opening_hours', {})
-                        is_open = opening_hours.get('open_now', None)
-                        
-                        store_data = {
-                            'name': details.get('name', place.get('name', 'Unknown Store')),
-                            'address': details.get('formatted_address', place.get('vicinity', 'Unknown Address')),
-                            'place_id': place['place_id'],
-                            'lat': place_lat,
-                            'lng': place_lng,
-                            'chain': store_info['chain'],
-                            'icon': store_info['icon'],
-                            'distance': distance,
-                            'rating': details.get('rating'),
-                            'rating_count': details.get('user_ratings_total'),
-                            'phone': details.get('formatted_phone_number'),
-                            'website': details.get('website'),
-                            'is_open': is_open,
-                            'business_status': details.get('business_status'),
-                            'verified': 'google_places'
-                        }
-                        
-                        all_stores.append(store_data)
-                        
-                    except Exception as place_error:
-                        safe_print(f"❌ Error processing place: {place_error}")
+        # Group by priority for efficient searching
+        priority_groups = defaultdict(list)
+        for store_config in store_configs:
+            priority_groups[store_config.priority].append(store_config)
+        
+        safe_print(f"🔍 Searching {len(store_configs)} store types in {len(priority_groups)} priority groups")
+        
+        # Search by priority (1 = highest priority)
+        for priority in sorted(priority_groups.keys()):
+            safe_print(f"🔍 Priority {priority} stores ({len(priority_groups[priority])} types)...")
+            
+            for store_config in priority_groups[priority]:
+                try:
+                    search_terms = store_config.search_terms or [store_config.query]
+                    
+                    for search_term in search_terms:
+                        try:
+                            safe_print(f"  🔍 Searching: {search_term}")
+                            
+                            # Search for nearby places
+                            places_result = gmaps.places_nearby(
+                                location=location,
+                                radius=radius_meters,
+                                keyword=search_term,
+                                type='establishment'
+                            )
+                            
+                            found_places = places_result.get('results', [])
+                            if found_places:
+                                safe_print(f"    📍 Found {len(found_places)} {store_config.chain} locations")
+                                break  # Found results for this store, no need to try other search terms
+                            
+                        except Exception as search_error:
+                            safe_print(f"    ❌ Search term '{search_term}' failed: {search_error}")
+                            continue
+                    
+                    if not found_places:
                         continue
-                
-                # Rate limiting
+                    
+                    # Process found places (limit per store type)
+                    places_to_process = found_places[:max_stores_per_type]
+                    processed_count = 0
+                    
+                    for place in places_to_process:
+                        try:
+                            place_lat = place['geometry']['location']['lat']
+                            place_lng = place['geometry']['location']['lng']
+                            distance = calculate_distance(lat, lng, place_lat, place_lng)
+                            
+                            # Skip if too far (convert radius to miles)
+                            max_distance_miles = radius_meters / 1609.34
+                            if distance > max_distance_miles:
+                                continue
+                            
+                            # Get detailed place information
+                            place_details = gmaps.place(
+                                place_id=place['place_id'],
+                                fields=[
+                                    'name', 'formatted_address', 'place_id', 'geometry', 
+                                    'rating', 'user_ratings_total', 'formatted_phone_number',
+                                    'opening_hours', 'website', 'business_status', 'price_level',
+                                    'types', 'vicinity'
+                                ]
+                            )
+                            
+                            details = place_details.get('result', {})
+                            
+                            # Enhanced opening hours processing
+                            opening_hours = details.get('opening_hours', {})
+                            is_open = opening_hours.get('open_now', None)
+                            weekly_hours = opening_hours.get('weekday_text', [])
+                            
+                            # Business status validation
+                            business_status = details.get('business_status', 'OPERATIONAL')
+                            if business_status in ['CLOSED_PERMANENTLY', 'CLOSED_TEMPORARILY']:
+                                continue
+                            
+                            # Enhanced store data
+                            store_data = {
+                                'name': details.get('name', place.get('name', 'Unknown Store')),
+                                'address': details.get('formatted_address', place.get('vicinity', 'Unknown Address')),
+                                'place_id': place['place_id'],
+                                'lat': place_lat,
+                                'lng': place_lng,
+                                'chain': store_config.chain,
+                                'icon': store_config.icon,
+                                'category': store_config.category,
+                                'priority': store_config.priority,
+                                'distance': distance,
+                                'rating': details.get('rating'),
+                                'rating_count': details.get('user_ratings_total'),
+                                'phone': details.get('formatted_phone_number'),
+                                'website': details.get('website'),
+                                'is_open': is_open,
+                                'weekly_hours': weekly_hours,
+                                'business_status': business_status,
+                                'price_level': details.get('price_level'),
+                                'types': details.get('types', []),
+                                'verified': 'google_places',
+                                'search_timestamp': datetime.utcnow().isoformat(),
+                                'search_radius': radius_meters,
+                                'quality_score': calculate_quality_score(details, distance)
+                            }
+                            
+                            all_stores.append(store_data)
+                            processed_count += 1
+                            
+                        except Exception as place_error:
+                            handle_error(place_error, f"Processing place for {store_config.chain}")
+                            continue
+                    
+                    if processed_count > 0:
+                        safe_print(f"    ✅ Processed {processed_count} {store_config.chain} locations")
+                    
+                    # Rate limiting between store types
+                    time.sleep(0.1)
+                    
+                except Exception as store_error:
+                    handle_error(store_error, f"Searching {store_config.chain}")
+                    continue
+            
+            # Longer pause between priority groups
+            if priority < max(priority_groups.keys()):
                 time.sleep(0.2)
-                
-            except Exception as search_error:
-                safe_print(f"❌ Error searching {store_info['query']}: {search_error}")
-                continue
         
-        # Sort by distance
-        all_stores.sort(key=lambda x: x['distance'])
-        safe_print(f"✅ Found {len(all_stores)} total stores")
-        return all_stores
+        # Remove duplicates and sort
+        unique_stores = remove_duplicate_stores(all_stores)
+        unique_stores.sort(key=lambda x: (x['priority'], x['distance'], -x.get('quality_score', 0)))
+        
+        safe_print(f"✅ Found {len(unique_stores)} unique stores (from {len(all_stores)} total)")
+        
+        # Cache the results
+        cache_ttl = 1800 if len(unique_stores) > 0 else 300  # Cache longer if we found results
+        store_cache.set(lat, lng, radius_meters, unique_stores, category, cache_ttl)
+        
+        return unique_stores
         
     except Exception as e:
-        safe_print(f"❌ Error in store search: {e}")
+        handle_error(e, "Enhanced store search")
         return []
 
-def calculate_distance(lat1, lng1, lat2, lng2):
-    """Calculate distance using Haversine formula"""
+def calculate_quality_score(place_details: Dict, distance: float) -> float:
+    """Calculate a quality score for ranking stores"""
+    score = 0.0
+    
+    # Rating contribution (0-5 points)
+    rating = place_details.get('rating')
+    if rating:
+        score += rating
+    
+    # Review count contribution (0-2 points)
+    review_count = place_details.get('user_ratings_total', 0)
+    if review_count > 0:
+        score += min(2.0, math.log10(review_count))
+    
+    # Distance penalty (closer = better)
+    distance_penalty = distance / 5.0  # Penalty increases with distance
+    score -= min(3.0, distance_penalty)
+    
+    # Has phone number (0.5 points)
+    if place_details.get('formatted_phone_number'):
+        score += 0.5
+    
+    # Has website (0.5 points)
+    if place_details.get('website'):
+        score += 0.5
+    
+    # Is currently open (1 point)
+    opening_hours = place_details.get('opening_hours', {})
+    if opening_hours.get('open_now'):
+        score += 1.0
+    
+    return max(0.0, score)
+
+def remove_duplicate_stores(stores: List[Dict]) -> List[Dict]:
+    """Remove duplicate stores based on place_id and location proximity"""
+    seen_place_ids = set()
+    unique_stores = []
+    
+    for store in stores:
+        place_id = store.get('place_id')
+        
+        if place_id in seen_place_ids:
+            continue
+        
+        # Check for location duplicates (within 100 meters)
+        is_duplicate = False
+        for existing_store in unique_stores:
+            existing_lat = existing_store['lat']
+            existing_lng = existing_store['lng']
+            distance_meters = calculate_distance(
+                store['lat'], store['lng'], 
+                existing_lat, existing_lng
+            ) * 1609.34  # Convert miles to meters
+            
+            if distance_meters < 100:  # Within 100 meters
+                # Keep the one with better quality score
+                if store.get('quality_score', 0) <= existing_store.get('quality_score', 0):
+                    is_duplicate = True
+                    break
+                else:
+                    # Remove the existing lower-quality store
+                    unique_stores.remove(existing_store)
+                    break
+        
+        if not is_duplicate:
+            seen_place_ids.add(place_id)
+            unique_stores.append(store)
+    
+    return unique_stores
+
+def calculate_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Calculate distance using Haversine formula (returns miles)"""
     try:
         R = 3958.8  # Earth radius in miles
         lat1_rad = math.radians(lat1)
@@ -226,28 +782,17 @@ def calculate_distance(lat1, lng1, lat2, lng2):
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
         
         return R * c
-    except:
-        return 999
+    except Exception as e:
+        handle_error(e, "Distance calculation")
+        return 999.0
 
-def get_store_branding(chain):
-    """Return store-specific branding"""
-    branding_map = {
-        "Target": {"emoji": "🎯", "color": 0xCC0000, "description": "Department Store"},
-        "Walmart": {"emoji": "🏪", "color": 0x0071CE, "description": "Superstore"},
-        "Best Buy": {"emoji": "🔌", "color": 0xFFE000, "description": "Electronics Store"},
-        "BJs": {"emoji": "🛒", "color": 0xFF6B35, "description": "Wholesale Club"}
-    }
-    
-    return branding_map.get(chain, {
-        "emoji": "🏢", "color": 0x7289DA, "description": "Store"
-    })
-
-def check_user_permissions(user_id, required_role='user'):
-    """Check user permissions"""
+# Enhanced user management
+def check_user_permissions(user_id: str, required_role: str = 'user') -> bool:
+    """Enhanced permission checking with role hierarchy"""
     try:
-        with get_db_connection() as conn:
+        with db_pool.get_connection() as conn:
             cursor = conn.execute(
-                'SELECT role FROM user_permissions WHERE user_id = ?',
+                'SELECT role, permissions FROM user_permissions WHERE user_id = ?',
                 (str(user_id),)
             )
             result = cursor.fetchone()
@@ -256,785 +801,233 @@ def check_user_permissions(user_id, required_role='user'):
                 return required_role == 'user'
             
             user_role = result['role']
-            role_hierarchy = {'user': 0, 'moderator': 1, 'admin': 2}
+            role_hierarchy = {'user': 0, 'moderator': 1, 'admin': 2, 'superadmin': 3}
             
-            return role_hierarchy.get(user_role, 0) >= role_hierarchy.get(required_role, 0)
+            has_permission = role_hierarchy.get(user_role, 0) >= role_hierarchy.get(required_role, 0)
+            
+            # Update last used timestamp
+            if has_permission:
+                conn.execute(
+                    'UPDATE user_permissions SET last_used = CURRENT_TIMESTAMP WHERE user_id = ?',
+                    (str(user_id),)
+                )
+            
+            return has_permission
+            
     except Exception as e:
-        safe_print(f"Error checking permissions: {e}")
+        handle_error(e, "Permission check")
         return required_role == 'user'
 
-def set_user_permission(user_id, role, granted_by, server_id=None):
-    """Set user permissions"""
+def log_analytics(user_id: str, action: str, data: Dict = None, 
+                 request_obj = None, guild_id: str = None, session_id: str = None) -> None:
+    """Enhanced analytics logging"""
     try:
-        with get_db_connection() as conn:
+        with db_pool.get_connection() as conn:
             conn.execute('''
-                INSERT OR REPLACE INTO user_permissions 
-                (user_id, role, server_id, granted_by)
-                VALUES (?, ?, ?, ?)
-            ''', (str(user_id), role, str(server_id) if server_id else None, str(granted_by)))
-        return True
+                INSERT INTO usage_analytics 
+                (user_id, guild_id, action, data, ip_address, user_agent, session_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                str(user_id) if user_id else None,
+                str(guild_id) if guild_id else None,
+                action,
+                json.dumps(data) if data else None,
+                request_obj.remote_addr if request_obj else None,
+                request_obj.headers.get('User-Agent') if request_obj else None,
+                session_id
+            ))
     except Exception as e:
-        safe_print(f"Error setting permissions: {e}")
-        return False
+        handle_error(e, "Analytics logging")
 
-def save_location_to_db(user_id, channel_id, lat, lng, accuracy=None, store_name=None, store_address=None, store_place_id=None, distance=None, is_real_time=False):
-    """Save location to database"""
-    try:
-        with get_db_connection() as conn:
-            conn.execute('''
-                INSERT INTO user_locations 
-                (user_id, channel_id, lat, lng, accuracy, store_name, store_address, store_place_id, distance, is_real_time)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (str(user_id), str(channel_id), lat, lng, accuracy, store_name, store_address, store_place_id, distance, is_real_time))
-        return True
-    except Exception as e:
-        safe_print(f"Error saving location: {e}")
-        return False
+# Enhanced background task management
+class TaskManager:
+    def __init__(self):
+        self.executor = ThreadPoolExecutor(max_workers=6)
+        self.active_tasks = set()
+    
+    async def add_background_task(self, func, *args, **kwargs):
+        """Add a background task"""
+        loop = asyncio.get_event_loop()
+        task = loop.run_in_executor(self.executor, func, *args, **kwargs)
+        self.active_tasks.add(task)
+        
+        # Clean up completed tasks
+        task.add_done_callback(lambda t: self.active_tasks.discard(t))
+        
+        return task
+    
+    async def cleanup_old_data(self):
+        """Clean up old database records"""
+        try:
+            cutoff_date = datetime.now() - timedelta(days=90)
+            
+            with db_pool.get_connection() as conn:
+                # Clean old location records
+                location_result = conn.execute(
+                    'DELETE FROM user_locations WHERE timestamp < ?',
+                    (cutoff_date,)
+                )
+                
+                # Clean old analytics (keep longer)
+                analytics_cutoff = datetime.now() - timedelta(days=180)
+                analytics_result = conn.execute(
+                    'DELETE FROM usage_analytics WHERE timestamp < ?',
+                    (analytics_cutoff,)
+                )
+                
+                # Clean expired cache entries
+                cache_result = conn.execute(
+                    'DELETE FROM store_cache WHERE expires_at < CURRENT_TIMESTAMP'
+                )
+                
+                safe_print(f"🧹 Cleanup: {location_result.rowcount} locations, "
+                          f"{analytics_result.rowcount} analytics, {cache_result.rowcount} cache")
+                
+        except Exception as e:
+            handle_error(e, "Data cleanup")
 
-def get_user_location_history(user_id, limit=10):
-    """Get user location history"""
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.execute('''
-                SELECT * FROM user_locations 
-                WHERE user_id = ? 
-                ORDER BY timestamp DESC 
-                LIMIT ?
-            ''', (str(user_id), limit))
-            return cursor.fetchall()
-    except Exception as e:
-        safe_print(f"Error getting location history: {e}")
-        return []
+task_manager = TaskManager()
 
-# Bot events
+# Global state management
+LOCATION_CHANNEL_ID = None
+LOCATION_USER_INFO = {}
+ACTIVE_SESSIONS = {}
+bot_ready = False
+bot_connected = False
+
+# Enhanced bot events
 @bot.event
 async def on_ready():
+    """Enhanced bot startup"""
     global bot_ready, bot_connected
+    
     safe_print(f"🤖 Discord bot connected: {bot.user}")
-    
-    # Initialize database
-    safe_print("🗄️ Initializing database...")
-    init_database()
-    
-    # Initialize Google Maps
-    safe_print("🗺️ Initializing Google Maps API...")
-    api_available = initialize_google_maps()
-    
     bot_connected = True
     
     try:
+        # Initialize database
+        safe_print("🗄️ Initializing enhanced database...")
+        init_enhanced_database()
+        
+        # Initialize Google Maps
+        safe_print("🗺️ Initializing Google Maps API...")
+        api_available = initialize_google_maps()
+        
+        # Start background tasks
+        safe_print("⚙️ Starting background tasks...")
+        cleanup_task.start()
+        cache_cleanup_task.start()
+        
+        # Sync slash commands
         synced = await bot.tree.sync()
         safe_print(f"🔄 Synced {len(synced)} slash commands")
+        
         bot_ready = True
-        safe_print("✅ Bot is ready with real-time Google Places integration!")
+        safe_print("✅ Enhanced Location Bot is ready!")
+        
+        # Set bot status
+        activity = discord.Activity(
+            type=discord.ActivityType.watching,
+            name=f"📍 {len(bot.guilds)} servers • /location"
+        )
+        await bot.change_presence(activity=activity)
+        
     except Exception as e:
-        safe_print(f"❌ Failed to sync commands: {e}")
+        handle_error(e, "Bot startup")
 
-# Bot commands
-@bot.tree.command(name="ping", description="Test if bot is working")
-async def ping(interaction: discord.Interaction):
-    """Test bot status"""
+@bot.event
+async def on_guild_join(guild):
+    """Handle new guild joins"""
+    safe_print(f"🆕 Joined new guild: {guild.name} ({guild.id})")
+    log_analytics(None, "guild_join", {"guild_id": guild.id, "guild_name": guild.name})
+
+@bot.event
+async def on_guild_remove(guild):
+    """Handle guild removals"""
+    safe_print(f"👋 Left guild: {guild.name} ({guild.id})")
+    log_analytics(None, "guild_leave", {"guild_id": guild.id, "guild_name": guild.name})
+
+# Background tasks
+@tasks.loop(hours=24)
+async def cleanup_task():
+    """Daily cleanup task"""
+    await task_manager.cleanup_old_data()
+
+@tasks.loop(hours=6)
+async def cache_cleanup_task():
+    """Cache cleanup task"""
+    store_cache.clear_expired()
+
+# Enhanced bot commands
+@bot.tree.command(name="ping", description="Check bot status and performance metrics")
+async def ping_command(interaction: discord.Interaction):
+    """Enhanced ping command with detailed status"""
     try:
-        google_status = "✅ Active" if gmaps else "❌ Not Available"
+        start_time = time.time()
+        
+        # Test database
+        db_start = time.time()
+        with db_pool.get_connection() as conn:
+            conn.execute('SELECT 1').fetchone()
+        db_time = (time.time() - db_start) * 1000
+        
+        # Test Google Maps API
+        maps_status = "✅ Active" if gmaps else "❌ Not Available"
+        weather_status = "✅ Active" if WEATHER_API_KEY else "❌ Not Configured"
+        cache_status = "✅ Redis" if store_cache.redis_client else "📝 Memory"
         
         embed = discord.Embed(
-            title="🏓 Real-Time Location Bot Status",
-            description="Dynamic Google Places integration",
+            title="🏓 Enhanced Location Bot Status",
+            description="Real-time location sharing with comprehensive store coverage",
             color=0x00FF00 if gmaps else 0xFFAA00
         )
         
+        # Core systems
         embed.add_field(name="🤖 Discord Bot", value="✅ Connected", inline=True)
-        embed.add_field(name="🗺️ Google Places API", value=google_status, inline=True)
-        embed.add_field(name="🔍 Search Method", value="🆕 Real-time Places Search" if gmaps else "❌ Disabled", inline=True)
+        embed.add_field(name="🗺️ Google Maps API", value=maps_status, inline=True)
+        embed.add_field(name="🌤️ Weather API", value=weather_status, inline=True)
         
-        api_key = os.getenv('GOOGLE_MAPS_API_KEY')
-        api_status = "🔑 Configured" if api_key else "❌ Missing"
-        embed.add_field(name="🔐 API Key Status", value=api_status, inline=True)
+        # Performance metrics
+        embed.add_field(name="💾 Cache System", value=cache_status, inline=True)
+        embed.add_field(name="🗄️ Database Response", value=f"{db_time:.1f}ms", inline=True)
+        embed.add_field(name="📊 Latency", value=f"{bot.latency*1000:.1f}ms", inline=True)
         
-        embed.set_footer(text="Real-Time Location Bot • Google Places Powered")
+        # Statistics
+        guild_count = len(bot.guilds)
+        user_count = sum(guild.member_count for guild in bot.guilds)
+        embed.add_field(name="🏢 Servers", value=f"{guild_count:,}", inline=True)
+        embed.add_field(name="👥 Users", value=f"{user_count:,}", inline=True)
+        embed.add_field(name="🔍 Store Types", value=f"{len(get_comprehensive_store_database())}", inline=True)
+        
+        # Features
+        features = [
+            "🔍 Real-time Google Places search",
+            "💾 Advanced caching system", 
+            "🌤️ Weather integration",
+            "📊 Usage analytics",
+            "👥 Group location sharing",
+            "⭐ Favorite locations",
+            "🎯 Smart store filtering"
+        ]
+        embed.add_field(name="✨ Features", value="\n".join(features), inline=False)
+        
+        embed.set_footer(text="Enhanced Location Bot • Powered by Google Places & OpenWeather")
         embed.timestamp = discord.utils.utcnow()
         
-        await interaction.response.send_message(embed=embed)
-        safe_print("Ping command executed successfully")
-        
-    except Exception as e:
-        safe_print(f"Ping command error: {e}")
-        await interaction.response.send_message("❌ Error checking bot status")
-
-@bot.tree.command(name="location", description="Share your location with real-time store search")
-async def location_command(interaction: discord.Interaction):
-    """Location sharing command"""
-    global LOCATION_CHANNEL_ID, LOCATION_USER_INFO
-    
-    try:
-        if not check_user_permissions(interaction.user.id, 'user'):
-            await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
-            return
-        
-        LOCATION_CHANNEL_ID = interaction.channel.id
-        
-        user_key = f"{interaction.channel.id}_{interaction.user.id}"
-        LOCATION_USER_INFO[user_key] = {
-            'user_id': interaction.user.id,
-            'username': interaction.user.display_name,
-            'full_username': str(interaction.user),
-            'avatar_url': interaction.user.display_avatar.url,
-            'timestamp': discord.utils.utcnow()
-        }
-        
-        embed = discord.Embed(
-            title="🔍 Real-Time Location Sharing",
-            description=f"Hey {interaction.user.display_name}! Use real-time store search!",
-            color=0x5865F2
-        )
-        
-        railway_url = os.getenv('RAILWAY_URL', 'https://web-production-f0220.up.railway.app')
-        website_url = f"{railway_url}?user={interaction.user.id}&channel={interaction.channel.id}"
-        
-        embed.add_field(
-            name="🔗 Real-Time Location Link",
-            value=f"[Click here for live store search]({website_url})",
-            inline=False
-        )
-        
-        embed.add_field(
-            name="🆕 Real-Time Features",
-            value="• Live Google Places search\n• Always accurate data\n• No duplicate stores\n• Real store information",
-            inline=False
-        )
-        
-        embed.set_footer(text="Real-Time Location System • Google Places API")
-        embed.timestamp = discord.utils.utcnow()
+        response_time = (time.time() - start_time) * 1000
+        embed.description += f"\n\n**Response Time:** {response_time:.1f}ms"
         
         await interaction.response.send_message(embed=embed)
         
-    except Exception as e:
-        safe_print(f"Location command error: {e}")
-        await interaction.response.send_message("❌ Error setting up location sharing")
-
-@bot.tree.command(name="setperm", description="Set user permissions (Admin only)")
-async def setperm_command(interaction: discord.Interaction, user: discord.Member, role: str):
-    """Set user permissions"""
-    try:
-        if not check_user_permissions(interaction.user.id, 'admin'):
-            await interaction.response.send_message("❌ You need admin permissions to use this command.", ephemeral=True)
-            return
-        
-        if role not in ['user', 'moderator', 'admin']:
-            await interaction.response.send_message("❌ Invalid role. Use: user, moderator, or admin", ephemeral=True)
-            return
-        
-        success = set_user_permission(user.id, role, interaction.user.id, interaction.guild.id)
-        
-        if success:
-            await interaction.response.send_message(f"✅ Set {user.display_name} role to **{role}**")
-        else:
-            await interaction.response.send_message("❌ Failed to set permissions")
-            
-    except Exception as e:
-        safe_print(f"Setperm command error: {e}")
-        await interaction.response.send_message("❌ Error setting permissions")
-
-# Flask routes
-@app.route('/', methods=['GET'])
-def index():
-    """Serve location sharing page"""
-    user_id = request.args.get('user')
-    channel_id = request.args.get('channel')
-    
-    user_info_js = json.dumps({
-        'user_id': user_id,
-        'channel_id': channel_id,
-        'google_maps_available': gmaps is not None
-    }) if user_id and channel_id else 'null'
-    
-    google_api_key = os.getenv('GOOGLE_MAPS_API_KEY', '')
-    
-    return f'''
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Real-Time Location Bot</title>
-    <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: linear-gradient(135deg, #4285F4 0%, #34A853 100%);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-        }}
-        .container {{
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(20px);
-            border-radius: 24px;
-            padding: 40px;
-            max-width: 600px;
-            width: 100%;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-            text-align: center;
-        }}
-        .logo {{ font-size: 48px; margin-bottom: 16px; }}
-        h1 {{ color: #2d3748; font-size: 28px; font-weight: 700; margin-bottom: 8px; }}
-        .subtitle {{ color: #718096; font-size: 16px; margin-bottom: 32px; }}
-        .realtime-badge {{
-            background: linear-gradient(135deg, #34A853, #0F9D58);
-            color: white;
-            padding: 12px;
-            border-radius: 12px;
-            margin-bottom: 24px;
-            font-size: 14px;
-            font-weight: 500;
-        }}
-        .location-button {{
-            background: linear-gradient(135deg, #4285F4 0%, #34A853 100%);
-            color: white;
-            border: none;
-            padding: 16px 32px;
-            border-radius: 16px;
-            font-size: 18px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 8px 25px rgba(66, 133, 244, 0.3);
-            margin-bottom: 24px;
-            width: 100%;
-        }}
-        .location-button:hover {{ transform: translateY(-2px); }}
-        .location-button:disabled {{ opacity: 0.6; cursor: not-allowed; }}
-        #map {{ height: 350px; width: 100%; border-radius: 12px; margin: 20px 0; display: none; }}
-        .status {{
-            margin: 24px 0;
-            padding: 16px;
-            border-radius: 12px;
-            font-weight: 500;
-            display: none;
-        }}
-        .status.success {{ background: linear-gradient(135deg, #34A853, #0F9D58); color: white; }}
-        .status.error {{ background: linear-gradient(135deg, #EA4335, #D33B2C); color: white; }}
-        .status.info {{ background: linear-gradient(135deg, #4285F4, #3367D6); color: white; }}
-        .nearby-stores {{ margin-top: 24px; text-align: left; display: none; max-height: 400px; overflow-y: auto; }}
-        .store-item {{
-            background: rgba(255, 255, 255, 0.95);
-            border: 1px solid rgba(0, 0, 0, 0.1);
-            border-radius: 16px;
-            padding: 20px;
-            margin-bottom: 16px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }}
-        .store-item:hover {{ transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1); }}
-        .store-item.google-verified {{ border-left: 4px solid #34A853; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="logo">🔍</div>
-        <h1>Real-Time Location Sharing</h1>
-        <p class="subtitle">Live Google Places search - always accurate!</p>
-        
-        <div class="realtime-badge">
-            🔍 REAL-TIME: Live Google Places API • Always current & accurate
-        </div>
-        
-        <button id="shareLocationBtn" class="location-button">
-            📍 Search Nearby Stores
-        </button>
-        
-        <div id="map"></div>
-        <div id="status" class="status"></div>
-        <div id="nearbyStores" class="nearby-stores"></div>
-        
-        <div style="margin-top: 32px; color: #a0aec0; font-size: 14px;">
-            <p>🔍 Real-time Google Places search</p>
-            <p>📍 Always current, accurate store data</p>
-        </div>
-    </div>
-
-    <script>
-        const USER_INFO = {user_info_js};
-        const GOOGLE_API_KEY = '{google_api_key}';
-        
-        let map;
-        let userMarker;
-        let storeMarkers = [];
-        let userLocation = null;
-        let nearbyStores = [];
-        
-        function loadGoogleMapsAPI() {{
-            if (typeof google !== 'undefined') {{
-                initializeMap();
-                return;
-            }}
-            
-            if (!GOOGLE_API_KEY) {{
-                showStatus('❌ Google Maps API key not configured', 'error');
-                return;
-            }}
-            
-            const script = document.createElement('script');
-            script.src = `https://maps.googleapis.com/maps/api/js?key=${{GOOGLE_API_KEY}}&libraries=marker,places&callback=initializeMap`;
-            script.onerror = () => showStatus('❌ Failed to load Google Maps API', 'error');
-            document.head.appendChild(script);
-        }}
-        
-        function initializeMap() {{
-            try {{
-                map = new google.maps.Map(document.getElementById('map'), {{
-                    zoom: 12,
-                    center: {{ lat: 42.3601, lng: -71.0589 }},
-                    mapId: 'DEMO_MAP_ID'
-                }});
-                showStatus('✅ Google Maps loaded successfully', 'success');
-                setTimeout(() => document.getElementById('status').style.display = 'none', 2000);
-            }} catch (error) {{
-                console.error('Map initialization error:', error);
-                showStatus('❌ Map initialization failed', 'error');
-            }}
-        }}
-        
-        async function searchNearbyStores(lat, lng) {{
-            showStatus('🔍 Searching for nearby stores...', 'info');
-            
-            try {{
-                const response = await fetch('/api/search-stores', {{
-                    method: 'POST',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{
-                        latitude: lat,
-                        longitude: lng,
-                        user_id: USER_INFO?.user_id
-                    }})
-                }});
-                
-                if (!response.ok) throw new Error('Search failed');
-                
-                const data = await response.json();
-                nearbyStores = data.stores || [];
-                
-                showStatus(`✅ Found ${{nearbyStores.length}} stores nearby`, 'success');
-                showStoresOnMap();
-                showStoresList();
-                
-            }} catch (error) {{
-                console.error('Store search error:', error);
-                showStatus('❌ Failed to search for stores', 'error');
-            }}
-        }}
-        
-        function showUserLocation(lat, lng) {{
-            if (!map) return;
-            
-            userLocation = {{ lat, lng }};
-            map.setCenter(userLocation);
-            map.setZoom(14);
-            
-            if (userMarker) userMarker.map = null;
-            
-            const userIcon = document.createElement('div');
-            userIcon.innerHTML = '📍';
-            userIcon.style.fontSize = '24px';
-            
-            userMarker = new google.maps.marker.AdvancedMarkerElement({{
-                map: map,
-                position: userLocation,
-                content: userIcon,
-                title: 'Your Location'
-            }});
-            
-            searchNearbyStores(lat, lng);
-        }}
-        
-        function showStoresOnMap() {{
-            storeMarkers.forEach(marker => marker.map = null);
-            storeMarkers = [];
-            
-            nearbyStores.slice(0, 20).forEach(store => {{
-                const storeIcon = document.createElement('div');
-                storeIcon.innerHTML = getStoreEmoji(store.chain);
-                storeIcon.style.fontSize = '20px';
-                storeIcon.style.cursor = 'pointer';
-                
-                const marker = new google.maps.marker.AdvancedMarkerElement({{
-                    map: map,
-                    position: {{ lat: store.lat, lng: store.lng }},
-                    content: storeIcon,
-                    title: `${{store.name}} (${{store.distance.toFixed(1)}} miles)`
-                }});
-                
-                marker.addListener('click', () => selectStore(store));
-                storeMarkers.push(marker);
-            }});
-        }}
-        
-        function showStoresList() {{
-            const storesContainer = document.getElementById('nearbyStores');
-            
-            if (nearbyStores.length === 0) {{
-                storesContainer.innerHTML = '<p>No stores found nearby.</p>';
-                storesContainer.style.display = 'block';
-                return;
-            }}
-            
-            const storesHTML = nearbyStores.slice(0, 15).map(store => {{
-                const distance = store.distance;
-                const rating = store.rating ? `⭐ ${{store.rating}}` : '';
-                const ratingCount = store.rating_count ? `(${{store.rating_count.toLocaleString()}})` : '';
-                
-                return `
-                    <div class="store-item google-verified" onclick="selectStore(${{JSON.stringify(store).replace(/"/g, '&quot;')}})">
-                        <div style="display: flex; justify-content: space-between; align-items: start;">
-                            <div style="flex: 1;">
-                                <strong>${{getStoreEmoji(store.chain)}} ${{store.name}}</strong>
-                                <br><small style="color: #666;">${{store.address}}</small>
-                                <br><small style="color: #34A853;">${{rating}} ${{ratingCount}}</small>
-                            </div>
-                            <div style="text-align: right;">
-                                <strong>${{distance.toFixed(1)}} mi</strong>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            }}).join('');
-            
-            storesContainer.innerHTML = storesHTML;
-            storesContainer.style.display = 'block';
-        }}
-        
-        function getStoreEmoji(chain) {{
-            const chainLower = chain.toLowerCase();
-            if (chainLower.includes('target')) return '🎯';
-            if (chainLower.includes('walmart')) return '🏪';
-            if (chainLower.includes('best buy')) return '🔌';
-            if (chainLower.includes('bjs')) return '🛒';
-            return '🏢';
-        }}
-        
-        function showStatus(message, type) {{
-            const statusDiv = document.getElementById('status');
-            statusDiv.textContent = message;
-            statusDiv.className = `status ${{type}}`;
-            statusDiv.style.display = 'block';
-        }}
-        
-        async function selectStore(store) {{
-            if (!userLocation) {{
-                showStatus('❌ Please share your location first', 'error');
-                return;
-            }}
-            
-            showStatus(`📍 Checking in to ${{store.name}}...`, 'info');
-            
-            try {{
-                const response = await fetch('/webhook/location', {{
-                    method: 'POST',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{
-                        latitude: userLocation.lat,
-                        longitude: userLocation.lng,
-                        accuracy: 10,
-                        isManualCheckIn: true,
-                        selectedStore: store,
-                        user_id: USER_INFO?.user_id
-                    }})
-                }});
-                
-                if (response.ok) {{
-                    showStatus(`✅ Checked in to ${{store.name}}!`, 'success');
-                }} else {{
-                    showStatus('❌ Failed to check in', 'error');
-                }}
-                
-            }} catch (error) {{
-                console.error('Check-in error:', error);
-                showStatus('❌ Check-in failed', 'error');
-            }}
-        }}
-        
-        document.getElementById('shareLocationBtn').addEventListener('click', function() {{
-            const button = this;
-            
-            if (!navigator.geolocation) {{
-                showStatus('❌ Geolocation not supported', 'error');
-                return;
-            }}
-            
-            button.disabled = true;
-            button.innerHTML = '📍 Getting location...';
-            showStatus('📍 Requesting location access...', 'info');
-            
-            navigator.geolocation.getCurrentPosition(
-                position => {{
-                    const latitude = position.coords.latitude;
-                    const longitude = position.coords.longitude;
-                    
-                    document.getElementById('map').style.display = 'block';
-                    showUserLocation(latitude, longitude);
-                    
-                    button.innerHTML = '✅ Location Found!';
-                    
-                    setTimeout(() => {{
-                        button.disabled = false;
-                        button.innerHTML = '📍 Search Nearby Stores';
-                    }}, 3000);
-                }},
-                error => {{
-                    showStatus('❌ Failed to get location. Please allow location access.', 'error');
-                    button.disabled = false;
-                    button.innerHTML = '📍 Search Nearby Stores';
-                }},
-                {{ enableHighAccuracy: true, timeout: 15000, maximumAge: 300000 }}
-            );
-        }});
-        
-        window.initializeMap = initializeMap;
-        loadGoogleMapsAPI();
-    </script>
-</body>
-</html>
-    '''
-
-@app.route('/api/search-stores', methods=['POST'])
-def api_search_stores():
-    """API endpoint for real-time store search"""
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No data provided"}), 400
-        
-        lat = float(data['latitude'])
-        lng = float(data['longitude'])
-        user_id = data.get('user_id')
-        
-        stores = search_nearby_stores(lat, lng)
-        
-        safe_print(f"🔍 Real-time search found {len(stores)} stores for user {user_id}")
-        
-        return jsonify({
-            "status": "success",
-            "stores": stores,
-            "search_location": {"lat": lat, "lng": lng},
-            "total_found": len(stores)
-        }), 200
-        
-    except Exception as e:
-        safe_print(f"❌ Store search API error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/webhook/location', methods=['POST'])
-def location_webhook():
-    """Location webhook"""
-    try:
-        data = request.get_json()
-        if not data or not bot_connected or not bot_ready:
-            return jsonify({"error": "Bot not ready"}), 503
-        
-        lat = float(data['latitude'])
-        lng = float(data['longitude'])
-        user_id = data.get('user_id')
-        selected_store_data = data.get('selectedStore')
-        
-        if user_id and selected_store_data:
-            save_location_to_db(
-                user_id=user_id,
-                channel_id=LOCATION_CHANNEL_ID,
-                lat=lat,
-                lng=lng,
-                accuracy=data.get('accuracy'),
-                store_name=selected_store_data['name'],
-                store_address=selected_store_data['address'],
-                store_place_id=selected_store_data.get('place_id'),
-                distance=selected_store_data['distance'],
-                is_real_time=data.get('isRealTime', False)
-            )
-        
-        if bot.loop and not bot.loop.is_closed():
-            future = asyncio.run_coroutine_threadsafe(
-                post_location_to_discord(data), 
-                bot.loop
-            )
-            
-            result = future.result(timeout=15)
-            if result:
-                return jsonify({"status": "success"}), 200
-            else:
-                return jsonify({"error": "Failed to post to Discord"}), 500
-        else:
-            return jsonify({"error": "Bot loop not available"}), 503
-        
-    except Exception as e:
-        safe_print(f"❌ Webhook error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-async def post_location_to_discord(location_data):
-    """Post location to Discord"""
-    global LOCATION_CHANNEL_ID, bot_ready, bot_connected, LOCATION_USER_INFO
-    
-    try:
-        if not bot_connected or not bot_ready or not LOCATION_CHANNEL_ID:
-            return False
-        
-        channel = bot.get_channel(LOCATION_CHANNEL_ID)
-        if not channel:
-            return False
-        
-        lat = float(location_data['latitude'])
-        lng = float(location_data['longitude'])
-        selected_store_data = location_data.get('selectedStore', None)
-        user_id = location_data.get('user_id', None)
-        
-        username = "Someone"
-        avatar_url = None
-        
-        if user_id:
-            user_key = f"{LOCATION_CHANNEL_ID}_{user_id}"
-            if user_key in LOCATION_USER_INFO:
-                user_info = LOCATION_USER_INFO[user_key]
-                username = user_info['username']
-                avatar_url = user_info['avatar_url']
-        
-        if selected_store_data:
-            store_name = selected_store_data['name']
-            store_address = selected_store_data['address']
-            distance = selected_store_data['distance']
-            chain = selected_store_data['chain']
-            rating = selected_store_data.get('rating')
-            rating_count = selected_store_data.get('rating_count')
-            place_id = selected_store_data.get('place_id')
-            store_lat = selected_store_data['lat']
-            store_lng = selected_store_data['lng']
-        else:
-            return False
-        
-        branding = get_store_branding(chain)
-        
-        embed = discord.Embed(
-            title=f"{branding['emoji']} {store_name}",
-            description=f"**{username}** is **{distance:.1f} miles** from this {branding['description'].lower()}",
-            color=branding['color']
+        log_analytics(
+            interaction.user.id, 
+            "ping_command", 
+            {"response_time": response_time, "db_time": db_time},
+            guild_id=interaction.guild.id if interaction.guild else None
         )
         
-        if avatar_url:
-            embed.set_author(name=f"{username}'s Location Check-in", icon_url=avatar_url)
-        
-        embed.add_field(
-            name="🏪 Store Details",
-            value=f"**{branding['emoji']} {store_name}**\n{branding['description']}",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="📏 Distance",
-            value=f"**{distance:.1f} miles**",
-            inline=True
-        )
-        
-        if rating and rating_count:
-            embed.add_field(
-                name="⭐ Rating",
-                value=f"**{rating}/5** ({rating_count:,} reviews)",
-                inline=True
-            )
-        
-        embed.add_field(
-            name="📍 Address",
-            value=store_address,
-            inline=False
-        )
-        
-        if place_id:
-            google_maps_url = f"https://maps.google.com/maps/place/?q=place_id:{place_id}"
-            embed.add_field(
-                name="🗺️ Google Maps",
-                value=f"[View Store Location]({google_maps_url})",
-                inline=True
-            )
-        
-        embed.add_field(
-            name="🔍 Data Source",
-            value="Live Google Places API",
-            inline=True
-        )
-        
-        embed.set_footer(text="Real-Time Location System • Google Places API")
-        embed.timestamp = discord.utils.utcnow()
-        
-        await channel.send(embed=embed)
-        safe_print(f"✅ Posted location to Discord for {username}")
-        return True
-        
     except Exception as e:
-        safe_print(f"❌ Error posting to Discord: {e}")
-        return False
+        error_id = handle_error(e, "Ping command")
+        await interaction.response.send_message(f"❌ Error checking bot status (ID: {error_id})")
 
-@app.route('/health', methods=['GET'])
-def health():
-    """Health check"""
-    return jsonify({
-        "status": "healthy",
-        "bot_connected": bot_connected,
-        "bot_ready": bot_ready,
-        "google_places_api": gmaps is not None,
-        "real_time_search": True if gmaps else False
-    }), 200
-
-def run_flask():
-    """Run Flask server"""
-    try:
-        port = int(os.getenv('PORT', 5000))
-        safe_print(f"🌐 Starting Flask server on port {port}")
-        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False, threaded=True)
-    except Exception as e:
-        safe_print(f"❌ Flask startup error: {e}")
-
-def main():
-    """Main function"""
-    safe_print("=== Starting Real-Time Location Bot ===")
-    
-    TOKEN = os.getenv('DISCORD_TOKEN')
-    if not TOKEN:
-        safe_print("❌ DISCORD_TOKEN environment variable not found!")
-        return
-    
-    GOOGLE_API_KEY = os.getenv('GOOGLE_MAPS_API_KEY')
-    if not GOOGLE_API_KEY:
-        safe_print("⚠️ GOOGLE_MAPS_API_KEY not found - real-time search disabled")
-    else:
-        safe_print("✅ Google Maps API key found")
-    
-    def start_bot():
-        safe_print("🤖 Starting Discord bot...")
-        try:
-            bot.run(TOKEN)
-        except Exception as e:
-            safe_print(f"❌ Bot error: {e}")
-    
-    bot_thread = threading.Thread(target=start_bot, daemon=True)
-    bot_thread.start()
-    
-    safe_print("⏰ Waiting for Discord bot to connect...")
-    max_wait = 60
-    waited = 0
-    while not bot_connected and waited < max_wait:
-        time.sleep(1)
-        waited += 1
-        if waited % 10 == 0:
-            safe_print(f"⏰ Still waiting... ({waited}s)")
-    
-    if bot_connected:
-        safe_print("✅ Discord bot connected!")
-        time.sleep(3)
-    else:
-        safe_print("⚠️ Bot not ready yet, but starting Flask anyway...")
-    
-    try:
-        run_flask()
-    except Exception as e:
-        safe_print(f"❌ Critical error: {e}")
-
-if __name__ == "__main__":
-    main()
+# Continue with more commands in the next part...
