@@ -28,10 +28,10 @@ from collections import defaultdict
 # Enhanced Flask app with rate limiting
 app = Flask(__name__)
 limiter = Limiter(
-    app,
     key_func=get_remote_address,
     default_limits=["500 per day", "100 per hour"],
-    storage_uri="memory://"
+    storage_uri="memory://",
+    app=app
 )
 
 # Enhanced bot setup
