@@ -170,10 +170,25 @@ def search_nearby_stores(lat, lng, radius_meters=8000):
                         # Get detailed place information
                         place_details = gmaps.place(
                             place_id=place['place_id'],
-                            fields=['name', 'formatted_address', 'place_id', 'geometry', 'rating', 'user_ratings_total']
+                            fields=[
+                                'name', 'formatted_address', 'place_id', 'geometry', 
+                                'rating', 'user_ratings_total', 'formatted_phone_number',
+                                'opening_hours', 'website', 'price_level', 'types',
+                                'business_status', 'plus_code'
+                            ]
                         )
                         
                         details = place_details.get('result', {})
+                        
+                        # Check if store is currently open
+                        opening_hours = details.get('opening_hours', {})
+                        is_open = opening_hours.get('open_now', None)
+                        hours_text = None
+                        if opening_hours.get('weekday_text'):
+                            # Get today's hours
+                            today = datetime.utcnow().weekday()  # Monday is 0
+                            if today < len(opening_hours['weekday_text']):
+                                hours_text = opening_hours['weekday_text'][today]
                         
                         store_data = {
                             'name': details.get('name', place.get('name', 'Unknown Store')),
@@ -186,8 +201,15 @@ def search_nearby_stores(lat, lng, radius_meters=8000):
                             'distance': distance,
                             'rating': details.get('rating'),
                             'rating_count': details.get('user_ratings_total'),
+                            'phone': details.get('formatted_phone_number'),
+                            'website': details.get('website'),
+                            'is_open': is_open,
+                            'hours_today': hours_text,
+                            'price_level': details.get('price_level'),
+                            'business_status': details.get('business_status'),
                             'verified': 'google_places',
-                            'search_query': store_info['query']
+                            'search_query': store_info['query'],
+                            'plus_code': details.get('plus_code', {}).get('global_code')
                         }
                         
                         all_stores.append(store_data)
@@ -725,31 +747,79 @@ def index():
         }}
 
         .store-item {{
-            background: rgba(255, 255, 255, 0.9);
+            background: rgba(255, 255, 255, 0.95);
             border: 1px solid rgba(0, 0, 0, 0.1);
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 12px;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 16px;
             transition: all 0.3s ease;
             cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
         }}
 
         .store-item:hover {{
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+            transform: translateY(-4px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+            border-color: #4285F4;
         }}
 
         .store-item.google-verified {{
             border-left: 4px solid #34A853;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(232, 245, 232, 0.3));
         }}
 
         .realtime-badge-small {{
+            background: linear-gradient(135deg, #34A853, #0F9D58);
+            color: white;
+            font-size: 10px;
+            padding: 3px 8px;
+            border-radius: 12px;
+            margin-left: 8px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+
+        .store-status {{
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 8px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+
+        .store-status.open {{
             background: #E8F5E8;
             color: #137333;
-            font-size: 10px;
-            padding: 2px 6px;
-            border-radius: 6px;
-            margin-left: 8px;
+        }}
+
+        .store-status.closed {{
+            background: #FEF7E0;
+            color: #B7791F;
+        }}
+
+        .store-status.unknown {{
+            background: #F3F4F6;
+            color: #6B7280;
+        }}
+
+        .distance-badge {{
+            background: linear-gradient(135deg, #4285F4, #3367D6);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 12px;
+            text-align: center;
+            font-weight: 600;
+        }}
+
+        .distance-badge.nearby {{
+            background: linear-gradient(135deg, #34A853, #0F9D58);
+        }}
+
+        .distance-badge.far {{
+            background: linear-gradient(135deg, #EA4335, #D33B2C);
         }}
     </style>
 </head>
@@ -960,24 +1030,53 @@ def index():
             const storesHTML = filteredStores.slice(0, 15).map(store => {{
                 const distance = store.distance;
                 const rating = store.rating ? `⭐ ${{store.rating}}` : '';
-                const ratingCount = store.rating_count ? `(${{store.rating_count}})` : '';
+                const ratingCount = store.rating_count ? `(${{store.rating_count.toLocaleString()}})` : '';
+                
+                // Store status
+                let statusIcon = '';
+                let statusText = '';
+                if (store.is_open === true) {{
+                    statusIcon = '🟢';
+                    statusText = 'OPEN';
+                }} else if (store.is_open === false) {{
+                    statusIcon = '🔴';
+                    statusText = 'CLOSED';
+                }} else {{
+                    statusIcon = '🟡';
+                    statusText = 'HOURS UNKNOWN';
+                }}
+                
+                // Hours today
+                const hoursToday = store.hours_today || '';
+                
+                // Phone number
+                const phone = store.phone || '';
                 
                 return `
                     <div class="store-item google-verified" 
                          onclick="selectStore(${{JSON.stringify(store).replace(/"/g, '&quot;')}})">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <div>
-                                <strong>${{getStoreEmoji(store.chain)}} ${{store.name}}</strong>
-                                <span class="realtime-badge-small">🔍 Live</span>
-                                <br>
-                                <small style="color: #666;">${{store.address}}</small>
-                                <br>
-                                <small style="color: #34A853;">${{rating}} ${{ratingCount}}</small>
+                        <div style="display: flex; justify-content: space-between; align-items: start;">
+                            <div style="flex: 1;">
+                                <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                                    <strong>${{getStoreEmoji(store.chain)}} ${{store.name}}</strong>
+                                    <span class="realtime-badge-small">🔍 Live</span>
+                                    <span style="margin-left: 8px; font-size: 12px;">${{statusIcon}} ${{statusText}}</span>
+                                </div>
+                                
+                                <div style="color: #666; font-size: 14px; line-height: 1.4;">
+                                    📍 ${{store.address}}<br>
+                                    ${{rating ? `${{rating}} ${{ratingCount}}<br>` : ''}}
+                                    ${{hoursToday ? `🕐 ${{hoursToday}}<br>` : ''}}
+                                    ${{phone ? `📞 ${{phone}}` : ''}}
+                                </div>
                             </div>
-                            <div style="text-align: right;">
-                                <strong>${{distance.toFixed(1)}} mi</strong>
-                                <br>
-                                <small>${{getDistanceStatus(distance)}}</small>
+                            <div style="text-align: right; margin-left: 16px;">
+                                <div style="font-size: 18px; font-weight: bold; color: #1a73e8;">
+                                    ${{distance.toFixed(1)}} mi
+                                </div>
+                                <div style="font-size: 12px; margin-top: 4px;">
+                                    ${{getDistanceStatus(distance)}}
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1213,7 +1312,7 @@ def location_webhook():
         return jsonify({"error": str(e)}), 500
 
 async def post_location_to_discord(location_data):
-    """Enhanced Discord posting with real-time store data"""
+    """Enhanced Discord posting with premium-style embed"""
     global LOCATION_CHANNEL_ID, bot_ready, bot_connected, LOCATION_USER_INFO
     
     try:
@@ -1249,66 +1348,220 @@ async def post_location_to_discord(location_data):
             distance = selected_store_data['distance']
             chain = selected_store_data['chain']
             rating = selected_store_data.get('rating')
+            rating_count = selected_store_data.get('rating_count')
             place_id = selected_store_data.get('place_id')
+            store_lat = selected_store_data['lat']
+            store_lng = selected_store_data['lng']
+            phone = selected_store_data.get('phone')
+            website = selected_store_data.get('website')
+            is_open = selected_store_data.get('is_open')
+            hours_today = selected_store_data.get('hours_today')
+            business_status = selected_store_data.get('business_status')
         else:
             return False
         
         # Get store branding
         branding = get_store_branding(chain)
         
-        # Create enhanced embed
-        title_text = f"{branding['emoji']} {username} is {distance:.1f} miles from {store_name}"
+        # Distance status and color
+        if distance <= 0.2:
+            distance_status = "🟢 AT STORE"
+            distance_color = "🟢"
+        elif distance <= 1.0:
+            distance_status = "🟡 NEARBY"
+            distance_color = "🟡"
+        else:
+            distance_status = "🔴 FAR"
+            distance_color = "🔴"
         
+        # Time-based greeting
+        current_hour = datetime.utcnow().hour - 5  # EST
+        if 5 <= current_hour < 12:
+            time_greeting = "Good morning"
+        elif 12 <= current_hour < 17:
+            time_greeting = "Good afternoon"
+        elif 17 <= current_hour < 21:
+            time_greeting = "Good evening"
+        else:
+            time_greeting = "Hello"
+        
+        # Create premium embed
         embed = discord.Embed(
-            title=title_text,
-            description=f"**{username}** checked in to **{store_name}** using real-time search",
+            title=f"{branding['emoji']} {store_name}",
+            description=f"**{time_greeting} {username}!** You're **{distance:.1f} miles** from this {branding['description'].lower()}",
             color=branding['color']
         )
         
+        # Set store logo as thumbnail if available
+        store_logos = {
+            "Target": "https://logos-world.net/wp-content/uploads/2020/04/Target-Logo.png",
+            "Walmart": "https://logos-world.net/wp-content/uploads/2020/05/Walmart-Logo.png", 
+            "Best Buy": "https://logos-world.net/wp-content/uploads/2020/04/Best-Buy-Logo.png",
+            "BJs": "https://logos-world.net/wp-content/uploads/2022/02/BJs-Wholesale-Club-Logo.png"
+        }
+        
+        if chain in store_logos:
+            embed.set_thumbnail(url=store_logos[chain])
+        
         if avatar_url:
-            embed.set_author(name=f"Real-Time Location Update from {username}", icon_url=avatar_url)
+            embed.set_author(
+                name=f"{username}'s Location Check-in", 
+                icon_url=avatar_url
+            )
         
-        # Enhanced fields with real-time data
-        embed.add_field(name="🏪 Store", value=store_name, inline=True)
-        embed.add_field(name="📏 Distance", value=f"{distance:.1f} miles", inline=True)
-        embed.add_field(name="🔍 Data Source", value="🆕 Live Google Places", inline=True)
-        
-        # Rating if available
-        if rating:
-            embed.add_field(name="⭐ Rating", value=f"{rating}/5", inline=True)
-        
-        # Google Maps link with Place ID
-        if place_id:
-            google_maps_url = f"https://maps.google.com/maps/place/?q=place_id:{place_id}"
-            embed.add_field(name="🗺️ Google Maps", value=f"[View Store]({google_maps_url})", inline=True)
-        
-        # Address
-        embed.add_field(name="📍 Address", value=store_address, inline=False)
-        
-        # Coordinates
+        # LOCATION STATUS (prominent first field)
         embed.add_field(
-            name="🧭 Coordinates",
-            value=f"**User:** {lat:.6f}, {lng:.6f}\n**Store:** {selected_store_data['lat']:.6f}, {selected_store_data['lng']:.6f}",
+            name=f"{distance_color} **LOCATION STATUS**",
+            value=f"**{distance_status}**\n📏 {distance:.1f} miles away\n🎯 GPS accuracy: ±{accuracy}m",
+            inline=False
+        )
+        
+        # STORE INFORMATION (two columns)
+        store_info = f"**{branding['emoji']} {store_name}**\n"
+        
+        # Rating and reviews
+        if rating and rating_count:
+            stars = "⭐" * int(rating)
+            store_info += f"{stars} **{rating}/5** ({rating_count:,} reviews)\n"
+        
+        # Open/closed status
+        if is_open is not None:
+            if is_open:
+                store_info += f"🟢 **OPEN NOW**\n"
+            else:
+                store_info += f"🔴 **CLOSED**\n"
+        elif business_status == "OPERATIONAL":
+            store_info += f"🟡 **STATUS UNKNOWN**\n"
+        
+        # Hours today
+        if hours_today:
+            store_info += f"🕐 {hours_today}\n"
+        
+        # Phone number
+        if phone:
+            store_info += f"📞 {phone}\n"
+        
+        store_info += f"🏢 {branding['description']}"
+        
+        embed.add_field(
+            name="🏪 **STORE DETAILS**",
+            value=store_info,
             inline=True
         )
         
-        # Real-time verification
+        # LOCATION DETAILS
+        location_info = f"📍 **Address:**\n{store_address}\n\n"
+        location_info += f"🧭 **Coordinates:**\n{store_lat:.5f}, {store_lng:.5f}"
+        
         embed.add_field(
-            name="✅ Verification",
-            value="🔍 Real-time Google Places search\n📍 Always current and accurate",
+            name="📍 **LOCATION INFO**",
+            value=location_info,
             inline=True
         )
         
-        # Enhanced footer
-        embed.set_footer(text="Real-Time Location System • Live Google Places API • No Static Database")
+        # ACTIONS & LINKS (prominent section)
+        google_maps_url = f"https://maps.google.com/maps/place/?q=place_id:{place_id}" if place_id else f"https://maps.google.com/maps?q={store_lat},{store_lng}"
+        apple_maps_url = f"https://maps.apple.com/?q={store_lat},{store_lng}"
+        directions_url = f"https://maps.google.com/maps/dir/{lat},{lng}/{store_lat},{store_lng}"
+        
+        actions_text = f"🗺️ [**Open in Google Maps**]({google_maps_url})\n"
+        actions_text += f"🧭 [**Get Directions**]({directions_url})\n"
+        
+        if phone:
+            # Format phone for tel: link
+            phone_clean = phone.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+            actions_text += f"📞 [**Call Store**](tel:{phone_clean})\n"
+        
+        if website:
+            actions_text += f"🌐 [**Visit Website**]({website})\n"
+        
+        actions_text += f"🍎 [**Apple Maps**]({apple_maps_url})"
+        
+        embed.add_field(
+            name="🚗 **QUICK ACTIONS**",
+            value=actions_text,
+            inline=False
+        )
+        
+        # TECHNICAL INFO (smaller, less prominent)
+        tech_info = f"🔍 **Data Source:** Live Google Places API\n"
+        tech_info += f"✅ **Verification:** Real-time search results\n"
+        tech_info += f"📊 **Accuracy:** Professional-grade GPS\n"
+        tech_info += f"🕐 **Search Time:** {datetime.utcnow().strftime('%I:%M %p UTC')}"
+        
+        embed.add_field(
+            name="⚙️ **TECHNICAL DETAILS**",
+            value=tech_info,
+            inline=True
+        )
+        
+        # USER LOCATION (matching column)
+        user_info = f"👤 **Your Location:**\n{lat:.5f}, {lng:.5f}\n\n"
+        user_info += f"📱 **Check-in Method:**\n{'🎯 Manual Selection' if is_manual else '📍 Auto-detected'}"
+        
+        embed.add_field(
+            name="📱 **YOUR POSITION**",
+            value=user_info,
+            inline=True
+        )
+        
+        # FOOTER with enhanced branding
+        embed.set_footer(
+            text=f"🔍 Real-Time Location System • Powered by Google Places API • Always Current & Accurate",
+            icon_url="https://cdn-icons-png.flaticon.com/512/2875/2875404.png"
+        )
         embed.timestamp = discord.utils.utcnow()
         
+        # Send the enhanced embed
         await channel.send(embed=embed)
-        safe_print(f"✅ Posted real-time location to Discord for {username}")
+        
+        # Optional: Send additional interactive buttons (if you want even more enhancement)
+        try:
+            # Create view with buttons for additional actions
+            from discord import ui
+            
+            class LocationView(ui.View):
+                def __init__(self):
+                    super().__init__(timeout=300)  # 5 minutes timeout
+                
+                @ui.button(label="📍 Share with Others", style=discord.ButtonStyle.primary, emoji="📍")
+                async def share_location(self, interaction: discord.Interaction, button: ui.Button):
+                    share_url = f"https://maps.google.com/maps?q={store_lat},{store_lng}"
+                    await interaction.response.send_message(
+                        f"📍 **{store_name}** location link:\n{share_url}", 
+                        ephemeral=True
+                    )
+                
+                @ui.button(label="📊 Store Info", style=discord.ButtonStyle.secondary, emoji="📊")
+                async def store_info(self, interaction: discord.Interaction, button: ui.Button):
+                    info_text = f"**{store_name}**\n"
+                    info_text += f"📍 {store_address}\n"
+                    if rating:
+                        info_text += f"⭐ {rating}/5 ({rating_count:,} reviews)\n"
+                    info_text += f"🏢 {branding['description']}\n"
+                    info_text += f"🔍 Data from Google Places API"
+                    
+                    await interaction.response.send_message(info_text, ephemeral=True)
+                
+                @ui.button(label="🧭 Get Directions", style=discord.ButtonStyle.success, emoji="🧭")
+                async def get_directions(self, interaction: discord.Interaction, button: ui.Button):
+                    directions_url = f"https://maps.google.com/maps/dir/{lat},{lng}/{store_lat},{store_lng}"
+                    await interaction.response.send_message(
+                        f"🧭 **Directions to {store_name}:**\n{directions_url}", 
+                        ephemeral=True
+                    )
+            
+            # Send view with buttons (comment out if you don't want buttons)
+            # await channel.send(view=LocationView())
+            
+        except Exception as button_error:
+            safe_print(f"⚠️ Button creation error: {button_error}")
+        
+        safe_print(f"✅ Posted enhanced location embed for {username}")
         return True
         
     except Exception as e:
-        safe_print(f"❌ Error posting to Discord: {e}")
+        safe_print(f"❌ Error posting enhanced embed: {e}")
         return False
 
 @app.route('/health', methods=['GET'])
