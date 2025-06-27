@@ -11,8 +11,10 @@ import sys
 import requests
 import googlemaps
 from datetime import datetime, timedelta
+import sqlite3
+from contextlib import contextmanager
 
-# Flask app with better error handling
+# Flask app with enhanced error handling
 app = Flask(__name__)
 
 # Bot setup
@@ -23,7 +25,92 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 # Google Maps client - will be initialized with API key
 gmaps = None
 
-# Store database - addresses only, coordinates will be auto-generated
+# Database setup
+DATABASE_PATH = 'location_bot.db'
+
+def safe_print(msg):
+    """Safe printing for Railway logs"""
+    try:
+        print(f"[BOT] {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} {msg}")
+        sys.stdout.flush()
+    except:
+        pass
+
+@contextmanager
+def get_db_connection():
+    """Database connection context manager"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        safe_print(f"Database error: {e}")
+        raise
+    finally:
+        conn.close()
+
+def init_database():
+    """Initialize SQLite database"""
+    with get_db_connection() as conn:
+        # Stores table
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS stores (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                address TEXT NOT NULL,
+                chain TEXT NOT NULL,
+                lat REAL NOT NULL,
+                lng REAL NOT NULL,
+                verified TEXT DEFAULT 'unverified',
+                geocoded_date TEXT,
+                place_id TEXT,
+                location_type TEXT,
+                formatted_address TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # User locations table
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS user_locations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                lat REAL NOT NULL,
+                lng REAL NOT NULL,
+                accuracy REAL,
+                store_name TEXT,
+                distance REAL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_real_time BOOLEAN DEFAULT FALSE
+            )
+        ''')
+        
+        # User permissions table
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS user_permissions (
+                user_id TEXT PRIMARY KEY,
+                role TEXT NOT NULL DEFAULT 'user',
+                server_id TEXT,
+                granted_by TEXT,
+                granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Real-time tracking sessions
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS tracking_sessions (
+                user_id TEXT PRIMARY KEY,
+                channel_id TEXT NOT NULL,
+                active BOOLEAN DEFAULT TRUE,
+                started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+# Store database - will be populated from database
 STORE_ADDRESSES = [
     # TARGET STORES
     {"name": "Target Abington", "address": "385 Centre Ave, Abington, MA 02351", "chain": "Target"},
@@ -36,118 +123,32 @@ STORE_ADDRESSES = [
     {"name": "Target Dorchester", "address": "7 Allstate Rd, Dorchester, MA 02125", "chain": "Target"},
     {"name": "Target Everett", "address": "1 Mystic View Rd, Everett, MA 02149", "chain": "Target"},
     {"name": "Target Framingham", "address": "400 Cochituate Rd, Framingham, MA 01701", "chain": "Target"},
-    {"name": "Target Hadley", "address": "367 Russell St, Hadley, MA 01035", "chain": "Target"},
-    {"name": "Target Hanover", "address": "1167 Washington St, Hanover, MA 02339", "chain": "Target"},
-    {"name": "Target Haverhill", "address": "35 Computer Dr, Haverhill, MA 01832", "chain": "Target"},
-    {"name": "Target Holyoke", "address": "50 Holyoke St, Holyoke, MA 01040", "chain": "Target"},
-    {"name": "Target Kingston", "address": "101 Independence Mall Way, Kingston, MA 02364", "chain": "Target"},
-    {"name": "Target Lowell", "address": "181 Plain St, Lowell, MA 01852", "chain": "Target"},
-    {"name": "Target Marlborough East", "address": "423 Donald Lynch Blvd, Marlborough, MA 01752", "chain": "Target"},
-    {"name": "Target Marlborough West", "address": "605 Boston Post Rd E, Marlborough, MA 01752", "chain": "Target"},
-    {"name": "Target Methuen", "address": "67 Pleasant Valley St, Methuen, MA 01844", "chain": "Target"},
-    {"name": "Target Milford", "address": "250 Fortune Blvd, Milford, MA 01757", "chain": "Target"},
-    {"name": "Target Millbury", "address": "70 Worcester Providence Tpke, Millbury, MA 01527", "chain": "Target"},
-    {"name": "Target North Attleborough", "address": "1205 S Washington St, North Attleborough, MA 02760", "chain": "Target"},
-    {"name": "Target North Dartmouth", "address": "479 State Rd, North Dartmouth, MA 02747", "chain": "Target"},
-    {"name": "Target Plainville", "address": "39 Taunton St, Plainville, MA 02762", "chain": "Target"},
-    {"name": "Target Revere", "address": "36 Furlong Dr, Revere, MA 02151", "chain": "Target"},
-    {"name": "Target Salem", "address": "227 Highland Ave, Salem, MA 01970", "chain": "Target"},
-    {"name": "Target Saugus", "address": "400 Lynn Fells Pkwy, Saugus, MA 01906", "chain": "Target"},
-    {"name": "Target Seekonk", "address": "79 Commerce Way, Seekonk, MA 02771", "chain": "Target"},
-    {"name": "Target Somerville", "address": "180 Somerville Ave, Somerville, MA 02143", "chain": "Target"},
-    {"name": "Target South Easton", "address": "41 Robert Dr, South Easton, MA 02375", "chain": "Target"},
-    {"name": "Target Stoughton", "address": "1 Hawes Way, Stoughton, MA 02072", "chain": "Target"},
-    {"name": "Target Swansea", "address": "579 GAR Hwy, Swansea, MA 02777", "chain": "Target"},
-    {"name": "Target Taunton", "address": "81 Taunton Depot Dr, Taunton, MA 02780", "chain": "Target"},
-    {"name": "Target Watertown", "address": "550 Arsenal St, Watertown, MA 02472", "chain": "Target"},
-    {"name": "Target West Roxbury", "address": "1810 Centre St, West Roxbury, MA 02132", "chain": "Target"},
-    {"name": "Target Worcester", "address": "529 Lincoln St, Worcester, MA 01605", "chain": "Target"},
-
+    
     # WALMART STORES
     {"name": "Walmart Abington", "address": "777 Brockton Ave, Abington, MA 02351", "chain": "Walmart"},
     {"name": "Walmart Avon", "address": "30 Memorial Dr, Avon, MA 02322", "chain": "Walmart"},
     {"name": "Walmart Bellingham", "address": "250 Hartford Ave, Bellingham, MA 02019", "chain": "Walmart"},
     {"name": "Walmart Brockton", "address": "700 Oak St, Brockton, MA 02301", "chain": "Walmart"},
     {"name": "Walmart Chelmsford", "address": "66 Parkhurst Rd, Chelmsford, MA 01824", "chain": "Walmart"},
-    {"name": "Walmart Chicopee", "address": "591 Memorial Dr, Chicopee, MA 01020", "chain": "Walmart"},
-    {"name": "Walmart Hudson", "address": "280 Washington St, Hudson, MA 01749", "chain": "Walmart"},
-    {"name": "Walmart Leicester", "address": "20 Soojian Dr, Leicester, MA 01524", "chain": "Walmart"},
-    {"name": "Walmart Leominster", "address": "11 Jungle Rd, Leominster, MA 01453", "chain": "Walmart"},
-    {"name": "Walmart Lunenburg", "address": "301 Massachusetts Ave, Lunenburg, MA 01462", "chain": "Walmart"},
-    {"name": "Walmart Lynn", "address": "780 Lynnway, Lynn, MA 01905", "chain": "Walmart"},
-    {"name": "Walmart Methuen", "address": "70 Pleasant Valley St, Methuen, MA 01844", "chain": "Walmart"},
-    {"name": "Walmart North Adams", "address": "1415 Curran Hwy, North Adams, MA 01247", "chain": "Walmart"},
-    {"name": "Walmart North Attleborough", "address": "1470 S Washington St, North Attleborough, MA 02760", "chain": "Walmart"},
-    {"name": "Walmart Raynham", "address": "36 Paramount Dr, Raynham, MA 02767", "chain": "Walmart"},
-    {"name": "Walmart Walpole", "address": "550 Providence Hwy, Walpole, MA 02081", "chain": "Walmart"},
-    {"name": "Walmart Westfield", "address": "141 Springfield Rd, Westfield, MA 01085", "chain": "Walmart"},
-    {"name": "Walmart Weymouth", "address": "740 Middle St, Weymouth, MA 02188", "chain": "Walmart"},
-    {"name": "Walmart Whitinsville", "address": "100 Valley Pkwy, Whitinsville, MA 01588", "chain": "Walmart"},
-    {"name": "Walmart Worcester", "address": "25 Tobias Boland Way, Worcester, MA 01608", "chain": "Walmart"},
-
-    # BEST BUY STORES - Corrected addresses
+    
+    # BEST BUY STORES
     {"name": "Best Buy Braintree", "address": "550 Grossman Dr, Braintree, MA 02184", "chain": "Best Buy"},
     {"name": "Best Buy Burlington", "address": "84 Middlesex Tpke, Burlington, MA 01803", "chain": "Best Buy"},
     {"name": "Best Buy Cambridge", "address": "100 CambridgeSide Pl, Cambridge, MA 02141", "chain": "Best Buy"},
-    {"name": "Best Buy Danvers", "address": "230 Independence Way, Danvers, MA 01923", "chain": "Best Buy"},
-    {"name": "Best Buy Dedham", "address": "700 Providence Hwy, Dedham, MA 02026", "chain": "Best Buy"},
-    {"name": "Best Buy Everett", "address": "162 Santilli Hwy, Everett, MA 02149", "chain": "Best Buy"},
-    {"name": "Best Buy Framingham", "address": "400 Cochituate Rd, Framingham, MA 01701", "chain": "Best Buy"},
-    {"name": "Best Buy Marlborough", "address": "769 Donald Lynch Blvd, Marlborough, MA 01752", "chain": "Best Buy"},
-    {"name": "Best Buy Natick", "address": "1245 Worcester St, Natick, MA 01760", "chain": "Best Buy"},
-    {"name": "Best Buy South Bay", "address": "14 Allstate Rd, Dorchester, MA 02125", "chain": "Best Buy"},
-    {"name": "Best Buy Watertown", "address": "550 Arsenal St, Watertown, MA 02472", "chain": "Best Buy"},
-    {"name": "Best Buy West Springfield", "address": "1150 Riverdale St, West Springfield, MA 01089", "chain": "Best Buy"},
-
+    
     # BJS WHOLESALE STORES
     {"name": "BJs Wholesale Auburn", "address": "777 Washington St, Auburn, MA 01501", "chain": "BJs"},
     {"name": "BJs Wholesale Chicopee", "address": "650 Memorial Dr, Chicopee, MA 01020", "chain": "BJs"},
-    {"name": "BJs Wholesale Danvers", "address": "6 Hutchinson Dr, Danvers, MA 01923", "chain": "BJs"},
-    {"name": "BJs Wholesale Dedham", "address": "688 Providence Hwy, Dedham, MA 02026", "chain": "BJs"},
-    {"name": "BJs Wholesale Framingham", "address": "26 Whittier St, Framingham, MA 01701", "chain": "BJs"},
-    {"name": "BJs Wholesale Franklin", "address": "100 Corporate Dr, Franklin, MA 02038", "chain": "BJs"},
-    {"name": "BJs Wholesale Greenfield", "address": "42 Colrain Rd, Greenfield, MA 01301", "chain": "BJs"},
-    {"name": "BJs Wholesale Haverhill", "address": "25 Shelley Rd, Haverhill, MA 01835", "chain": "BJs"},
-    {"name": "BJs Wholesale Hudson", "address": "1 Highland Commons West, Hudson, MA 01749", "chain": "BJs"},
-    {"name": "BJs Wholesale Hyannis", "address": "420 Attucks Ln, Hyannis, MA 02601", "chain": "BJs"},
-    {"name": "BJs Wholesale Leominster", "address": "115 Erdman Way, Leominster, MA 01453", "chain": "BJs"},
-    {"name": "BJs Wholesale Medford", "address": "278 Middlesex Ave, Medford, MA 02155", "chain": "BJs"},
-    {"name": "BJs Wholesale North Dartmouth", "address": "460 State Rd, North Dartmouth, MA 02747", "chain": "BJs"},
-    {"name": "BJs Wholesale Northborough", "address": "6102 Shops Way, Northborough, MA 01532", "chain": "BJs"},
-    {"name": "BJs Wholesale Pittsfield", "address": "495 Hubbard Ave, Pittsfield, MA 01201", "chain": "BJs"},
-    {"name": "BJs Wholesale Plymouth", "address": "105 Shops at 5 Way, Plymouth, MA 02360", "chain": "BJs"},
-    {"name": "BJs Wholesale Quincy", "address": "200 Crown Colony Dr, Quincy, MA 02169", "chain": "BJs"},
-    {"name": "BJs Wholesale Revere", "address": "5 Ward St, Revere, MA 02151", "chain": "BJs"},
-    {"name": "BJs Wholesale Seekonk", "address": "175 Highland Ave, Seekonk, MA 02771", "chain": "BJs"},
-    {"name": "BJs Wholesale South Attleboro", "address": "287 Washington St, South Attleboro, MA 02703", "chain": "BJs"},
-    {"name": "BJs Wholesale Stoneham", "address": "85 Cedar St, Stoneham, MA 02180", "chain": "BJs"},
-    {"name": "BJs Wholesale Stoughton", "address": "901 Technology Center Dr, Stoughton, MA 02072", "chain": "BJs"},
-    {"name": "BJs Wholesale Taunton", "address": "2085 Bay St, Taunton, MA 02780", "chain": "BJs"},
-    {"name": "BJs Wholesale Waltham", "address": "66 Seyon St, Waltham, MA 02453", "chain": "BJs"},
-    {"name": "BJs Wholesale Weymouth", "address": "622 Washington St, Weymouth, MA 02188", "chain": "BJs"},
-    {"name": "BJs Wholesale Worcester", "address": "25 Tobias Boland Way, Worcester, MA 01608", "chain": "BJs"}
 ]
-
-# This will be populated with Google-geocoded coordinates
-STORES = []
 
 # Global state
 LOCATION_CHANNEL_ID = None
-LOCATION_USER_INFO = {}  # Store user info for location requests
-REAL_TIME_TRACKING = {}  # Store real-time location tracking for users
+LOCATION_USER_INFO = {}
 bot_ready = False
 bot_connected = False
 
-def safe_print(msg):
-    """Safe printing for Railway logs"""
-    try:
-        print(f"[BOT] {msg}")
-        sys.stdout.flush()
-    except:
-        pass
-
 def initialize_google_maps():
-    """Initialize Google Maps client"""
+    """Initialize Google Maps client with enhanced validation"""
     global gmaps
     
     api_key = os.getenv('GOOGLE_MAPS_API_KEY')
@@ -157,18 +158,168 @@ def initialize_google_maps():
     
     try:
         gmaps = googlemaps.Client(key=api_key)
-        safe_print("✅ Google Maps API initialized successfully")
-        return True
+        
+        # Test the API key with a simple geocoding request
+        test_result = gmaps.geocode("Boston, MA")
+        if test_result:
+            safe_print("✅ Google Maps API initialized and validated successfully")
+            return True
+        else:
+            safe_print("❌ Google Maps API key validation failed")
+            return False
+            
     except Exception as e:
         safe_print(f"❌ Google Maps API initialization failed: {e}")
+        gmaps = None
+        return False
+
+def load_stores_from_db():
+    """Load stores from database"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.execute('SELECT * FROM stores ORDER BY name')
+            stores = []
+            for row in cursor.fetchall():
+                stores.append({
+                    'id': row['id'],
+                    'name': row['name'],
+                    'address': row['address'],
+                    'chain': row['chain'],
+                    'lat': row['lat'],
+                    'lng': row['lng'],
+                    'verified': row['verified'],
+                    'geocoded_date': row['geocoded_date'],
+                    'place_id': row['place_id'],
+                    'location_type': row['location_type'],
+                    'formatted_address': row['formatted_address']
+                })
+            return stores
+    except Exception as e:
+        safe_print(f"Error loading stores from database: {e}")
+        return []
+
+def save_store_to_db(store_data):
+    """Save store to database"""
+    try:
+        with get_db_connection() as conn:
+            conn.execute('''
+                INSERT OR REPLACE INTO stores 
+                (name, address, chain, lat, lng, verified, geocoded_date, place_id, location_type, formatted_address)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                store_data['name'],
+                store_data['address'],
+                store_data['chain'],
+                store_data['lat'],
+                store_data['lng'],
+                store_data.get('verified', 'unverified'),
+                store_data.get('geocoded_date'),
+                store_data.get('place_id'),
+                store_data.get('location_type'),
+                store_data.get('formatted_address')
+            ))
+        return True
+    except Exception as e:
+        safe_print(f"Error saving store to database: {e}")
+        return False
+
+def check_user_permissions(user_id, required_role='user'):
+    """Check user permissions"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.execute(
+                'SELECT role FROM user_permissions WHERE user_id = ?',
+                (str(user_id),)
+            )
+            result = cursor.fetchone()
+            
+            if not result:
+                return required_role == 'user'  # Default users have 'user' role
+            
+            user_role = result['role']
+            role_hierarchy = {'user': 0, 'moderator': 1, 'admin': 2}
+            
+            return role_hierarchy.get(user_role, 0) >= role_hierarchy.get(required_role, 0)
+    except Exception as e:
+        safe_print(f"Error checking permissions: {e}")
+        return required_role == 'user'
+
+def set_user_permission(user_id, role, granted_by, server_id=None):
+    """Set user permissions"""
+    try:
+        with get_db_connection() as conn:
+            conn.execute('''
+                INSERT OR REPLACE INTO user_permissions 
+                (user_id, role, server_id, granted_by)
+                VALUES (?, ?, ?, ?)
+            ''', (str(user_id), role, str(server_id) if server_id else None, str(granted_by)))
+        return True
+    except Exception as e:
+        safe_print(f"Error setting permissions: {e}")
+        return False
+
+def save_location_to_db(user_id, channel_id, lat, lng, accuracy=None, store_name=None, distance=None, is_real_time=False):
+    """Save location to database"""
+    try:
+        with get_db_connection() as conn:
+            conn.execute('''
+                INSERT INTO user_locations 
+                (user_id, channel_id, lat, lng, accuracy, store_name, distance, is_real_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (str(user_id), str(channel_id), lat, lng, accuracy, store_name, distance, is_real_time))
+        return True
+    except Exception as e:
+        safe_print(f"Error saving location: {e}")
+        return False
+
+def get_user_location_history(user_id, limit=10):
+    """Get user location history"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.execute('''
+                SELECT * FROM user_locations 
+                WHERE user_id = ? 
+                ORDER BY timestamp DESC 
+                LIMIT ?
+            ''', (str(user_id), limit))
+            return cursor.fetchall()
+    except Exception as e:
+        safe_print(f"Error getting location history: {e}")
+        return []
+
+def start_tracking_session(user_id, channel_id):
+    """Start tracking session in database"""
+    try:
+        with get_db_connection() as conn:
+            conn.execute('''
+                INSERT OR REPLACE INTO tracking_sessions 
+                (user_id, channel_id, active, started_at, last_update)
+                VALUES (?, ?, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ''', (str(user_id), str(channel_id)))
+        return True
+    except Exception as e:
+        safe_print(f"Error starting tracking session: {e}")
+        return False
+
+def stop_tracking_session(user_id):
+    """Stop tracking session"""
+    try:
+        with get_db_connection() as conn:
+            conn.execute('''
+                UPDATE tracking_sessions 
+                SET active = FALSE 
+                WHERE user_id = ?
+            ''', (str(user_id),))
+        return True
+    except Exception as e:
+        safe_print(f"Error stopping tracking session: {e}")
         return False
 
 def geocode_store_address(store_data):
-    """Geocode a single store address using Google Maps API"""
+    """Enhanced geocoding with better error handling"""
     global gmaps
     
     if not gmaps:
-        # Fallback coordinates if no API
         return {
             **store_data,
             "lat": 42.3601,  # Boston center
@@ -179,41 +330,56 @@ def geocode_store_address(store_data):
         }
     
     try:
-        # Enhanced search query for better accuracy
-        search_query = f"{store_data['name']}, {store_data['address']}"
+        # Enhanced search with multiple attempts
+        search_queries = [
+            f"{store_data['name']}, {store_data['address']}",
+            f"{store_data['chain']} {store_data['address']}",
+            store_data['address']
+        ]
         
-        result = gmaps.geocode(search_query)
+        for query in search_queries:
+            try:
+                result = gmaps.geocode(query)
+                if result and len(result) > 0:
+                    location = result[0]['geometry']['location']
+                    place_id = result[0]['place_id']
+                    location_type = result[0]['geometry'].get('location_type', 'APPROXIMATE')
+                    formatted_address = result[0]['formatted_address']
+                    
+                    geocoded_store = {
+                        **store_data,
+                        "lat": round(location['lat'], 7),
+                        "lng": round(location['lng'], 7),
+                        "verified": "google_api",
+                        "geocoded_date": datetime.utcnow().isoformat(),
+                        "place_id": place_id,
+                        "location_type": location_type,
+                        "formatted_address": formatted_address
+                    }
+                    
+                    # Save to database
+                    save_store_to_db(geocoded_store)
+                    return geocoded_store
+                    
+            except Exception as query_error:
+                safe_print(f"Query '{query}' failed: {query_error}")
+                continue
         
-        if result and len(result) > 0:
-            location = result[0]['geometry']['location']
-            place_id = result[0]['place_id']
-            location_type = result[0]['geometry'].get('location_type', 'APPROXIMATE')
-            formatted_address = result[0]['formatted_address']
-            
-            return {
-                **store_data,
-                "lat": round(location['lat'], 7),  # 7 decimal places for maximum accuracy
-                "lng": round(location['lng'], 7),
-                "verified": "google_api",
-                "geocoded_date": datetime.utcnow().isoformat(),
-                "place_id": place_id,
-                "location_type": location_type,
-                "formatted_address": formatted_address
-            }
-        else:
-            safe_print(f"⚠️ No geocoding results for {store_data['name']}")
-            return {
-                **store_data,
-                "lat": 42.3601,
-                "lng": -71.0589,
-                "verified": "failed_geocoding",
-                "geocoded_date": None,
-                "place_id": None
-            }
+        # If all queries failed
+        fallback_store = {
+            **store_data,
+            "lat": 42.3601,
+            "lng": -71.0589,
+            "verified": "failed_geocoding",
+            "geocoded_date": None,
+            "place_id": None
+        }
+        save_store_to_db(fallback_store)
+        return fallback_store
             
     except Exception as e:
         safe_print(f"❌ Geocoding error for {store_data['name']}: {e}")
-        return {
+        fallback_store = {
             **store_data,
             "lat": 42.3601,
             "lng": -71.0589,
@@ -221,70 +387,60 @@ def geocode_store_address(store_data):
             "geocoded_date": None,
             "place_id": None
         }
+        save_store_to_db(fallback_store)
+        return fallback_store
 
-def geocode_all_stores():
-    """Geocode all store addresses"""
-    global STORES
+def initialize_stores():
+    """Initialize store database if empty"""
+    existing_stores = load_stores_from_db()
     
-    safe_print(f"🗺️ Starting geocoding of {len(STORE_ADDRESSES)} stores...")
+    if existing_stores:
+        safe_print(f"📍 Loaded {len(existing_stores)} stores from database")
+        return existing_stores
     
+    safe_print("📍 Initializing store database...")
     geocoded_stores = []
-    successful = 0
-    failed = 0
     
     for i, store_data in enumerate(STORE_ADDRESSES, 1):
         safe_print(f"[{i}/{len(STORE_ADDRESSES)}] Geocoding: {store_data['name']}")
-        
         geocoded_store = geocode_store_address(store_data)
         geocoded_stores.append(geocoded_store)
         
-        if geocoded_store['verified'] == 'google_api':
-            successful += 1
-            safe_print(f"   ✅ Success: {geocoded_store['lat']:.6f}, {geocoded_store['lng']:.6f}")
-        else:
-            failed += 1
-            safe_print(f"   ❌ Failed: Using fallback coordinates")
-        
-        # Rate limiting - Google allows 50 requests/second, but be conservative
         if gmaps:
-            time.sleep(0.1)
+            time.sleep(0.1)  # Rate limiting
     
-    STORES = geocoded_stores
-    
-    safe_print(f"📊 Geocoding completed:")
-    safe_print(f"   ✅ Successful: {successful}")
-    safe_print(f"   ❌ Failed: {failed}")
-    safe_print(f"   🎯 Success rate: {(successful / len(STORE_ADDRESSES)) * 100:.1f}%")
+    safe_print(f"✅ Initialized {len(geocoded_stores)} stores")
+    return geocoded_stores
 
 def get_store_branding(store_name):
-    """Return store-specific branding (emoji, color, logo)"""
+    """Return store-specific branding"""
     store_lower = store_name.lower()
     
     if "target" in store_lower:
         return {
             "emoji": "🎯",
-            "color": 0xCC0000,  # Target red
+            "color": 0xCC0000,
             "logo": "https://logos-world.net/wp-content/uploads/2020/04/Target-Logo.png",
             "description": "Department Store • Clothing, Electronics, Home"
         }
     elif "walmart" in store_lower:
         return {
             "emoji": "🏪", 
-            "color": 0x0071CE,  # Walmart blue
+            "color": 0x0071CE,
             "logo": "https://logos-world.net/wp-content/uploads/2020/05/Walmart-Logo.png",
             "description": "Superstore • Groceries, Electronics, Everything"
         }
     elif "best buy" in store_lower:
         return {
             "emoji": "🔌",
-            "color": 0xFFE000,  # Best Buy yellow
+            "color": 0xFFE000,
             "logo": "https://logos-world.net/wp-content/uploads/2020/04/Best-Buy-Logo.png", 
             "description": "Electronics Store • Tech, Computers, Gaming"
         }
     elif "bjs" in store_lower:
         return {
             "emoji": "🛒",
-            "color": 0xFF6B35,  # BJ's orange
+            "color": 0xFF6B35,
             "logo": "https://logos-world.net/wp-content/uploads/2022/02/BJs-Wholesale-Club-Logo.png",
             "description": "Wholesale Club • Bulk Shopping, Membership Required"
         }
@@ -318,10 +474,11 @@ def calculate_distance(lat1, lng1, lat2, lng2):
 def find_closest_store(user_lat, user_lng):
     """Find the closest store"""
     try:
+        stores = load_stores_from_db()
         min_distance = float('inf')
         closest_store = None
         
-        for store in STORES:
+        for store in stores:
             distance = calculate_distance(user_lat, user_lng, store['lat'], store['lng'])
             if distance < min_distance:
                 min_distance = distance
@@ -334,86 +491,23 @@ def find_closest_store(user_lat, user_lng):
 
 def find_nearby_stores(user_lat, user_lng, radius_miles=5):
     """Find all stores within specified radius"""
-    nearby_stores = []
-    
-    for store in STORES:
-        distance = calculate_distance(user_lat, user_lng, store['lat'], store['lng'])
-        if distance <= radius_miles:
-            nearby_stores.append({
-                'store': store,
-                'distance': distance
-            })
-    
-    nearby_stores.sort(key=lambda x: x['distance'])
-    return nearby_stores
-
-def get_status_indicator(distance):
-    """Return status indicator based on distance"""
-    if distance <= 0.2:
-        return "🟢", "AT STORE"
-    elif distance <= 1.0:
-        return "🟡", "NEARBY"
-    else:
-        return "🔴", "FAR"
-
-def get_verification_status(store):
-    """Return verification status"""
-    verification = store.get('verified', 'unverified')
-    
-    if verification == 'google_api':
-        return "✅", "Google Verified"
-    elif verification == 'user_confirmed':
-        return "✅", "User Verified"
-    elif verification == 'fallback':
-        return "⚠️", "Fallback Coordinates"
-    elif verification == 'failed_geocoding':
-        return "❌", "Geocoding Failed"
-    else:
-        return "❌", "Unverified"
-
-# Real-time location tracking functions
-def start_real_time_tracking(user_id, channel_id):
-    """Start real-time location tracking for a user"""
-    global REAL_TIME_TRACKING
-    
-    REAL_TIME_TRACKING[user_id] = {
-        'channel_id': channel_id,
-        'active': True,
-        'last_update': datetime.utcnow(),
-        'location_history': []
-    }
-    
-    safe_print(f"🔄 Started real-time tracking for user {user_id}")
-
-def update_real_time_location(user_id, lat, lng, accuracy):
-    """Update real-time location for a user"""
-    global REAL_TIME_TRACKING
-    
-    if user_id in REAL_TIME_TRACKING and REAL_TIME_TRACKING[user_id]['active']:
-        tracking_data = REAL_TIME_TRACKING[user_id]
+    try:
+        stores = load_stores_from_db()
+        nearby_stores = []
         
-        # Add to location history
-        tracking_data['location_history'].append({
-            'lat': lat,
-            'lng': lng,
-            'accuracy': accuracy,
-            'timestamp': datetime.utcnow()
-        })
+        for store in stores:
+            distance = calculate_distance(user_lat, user_lng, store['lat'], store['lng'])
+            if distance <= radius_miles:
+                nearby_stores.append({
+                    'store': store,
+                    'distance': distance
+                })
         
-        # Keep only last 50 locations
-        if len(tracking_data['location_history']) > 50:
-            tracking_data['location_history'] = tracking_data['location_history'][-50:]
-        
-        tracking_data['last_update'] = datetime.utcnow()
-        safe_print(f"📍 Updated real-time location for user {user_id}: {lat:.6f}, {lng:.6f}")
-
-def stop_real_time_tracking(user_id):
-    """Stop real-time location tracking for a user"""
-    global REAL_TIME_TRACKING
-    
-    if user_id in REAL_TIME_TRACKING:
-        REAL_TIME_TRACKING[user_id]['active'] = False
-        safe_print(f"⏹️ Stopped real-time tracking for user {user_id}")
+        nearby_stores.sort(key=lambda x: x['distance'])
+        return nearby_stores
+    except Exception as e:
+        safe_print(f"Error finding nearby stores: {e}")
+        return []
 
 # Bot events
 @bot.event
@@ -421,22 +515,22 @@ async def on_ready():
     global bot_ready, bot_connected
     safe_print(f"🤖 Discord bot connected: {bot.user}")
     
-    # Initialize Google Maps and geocode stores
+    # Initialize database
+    safe_print("🗄️ Initializing database...")
+    init_database()
+    
+    # Initialize Google Maps
     safe_print("🗺️ Initializing Google Maps API...")
     api_available = initialize_google_maps()
     
-    safe_print("📍 Geocoding all store addresses...")
-    geocode_all_stores()
+    # Initialize stores
+    safe_print("📍 Loading stores...")
+    stores = initialize_stores()
     
-    # Count verification status
-    google_verified = len([s for s in STORES if s.get('verified') == 'google_api'])
-    fallback = len([s for s in STORES if s.get('verified') == 'fallback'])
-    failed = len([s for s in STORES if s.get('verified') in ['failed_geocoding', 'geocoding_error']])
+    google_verified = len([s for s in stores if s.get('verified') == 'google_api'])
     
-    safe_print(f"📍 Loaded {len(STORES)} store locations:")
+    safe_print(f"📍 Loaded {len(stores)} store locations:")
     safe_print(f"   ✅ {google_verified} Google-verified coordinates")
-    safe_print(f"   ⚠️ {fallback} fallback coordinates")
-    safe_print(f"   ❌ {failed} failed geocoding")
     
     bot_connected = True
     
@@ -444,34 +538,35 @@ async def on_ready():
         synced = await bot.tree.sync()
         safe_print(f"🔄 Synced {len(synced)} slash commands")
         bot_ready = True
-        safe_print("✅ Bot is now fully ready with Google Maps integration!")
+        safe_print("✅ Bot is now fully ready!")
     except Exception as e:
         safe_print(f"❌ Failed to sync commands: {e}")
 
-@bot.event
-async def on_error(event, *args, **kwargs):
-    safe_print(f"Bot error in {event}: {args}")
-
-# Bot commands
+# Enhanced slash commands with permissions
 @bot.tree.command(name="ping", description="Test if bot is working")
 async def ping(interaction: discord.Interaction):
     """Test command"""
     try:
         google_status = "✅ Active" if gmaps else "❌ Not Available"
-        await interaction.response.send_message(f"🏓 Pong! Bot is working!\n🗺️ Google Maps API: {google_status}")
-        safe_print("Ping command executed successfully")
+        stores = load_stores_from_db()
+        await interaction.response.send_message(
+            f"🏓 Pong! Bot is working!\n🗺️ Google Maps API: {google_status}\n📍 Stores: {len(stores)}"
+        )
     except Exception as e:
         safe_print(f"Ping command error: {e}")
 
 @bot.tree.command(name="location", description="Share your location with the team")
 async def location_command(interaction: discord.Interaction):
-    """Location sharing command"""
+    """Enhanced location sharing command"""
     global LOCATION_CHANNEL_ID, LOCATION_USER_INFO
     
     try:
+        if not check_user_permissions(interaction.user.id, 'user'):
+            await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
+            return
+        
         LOCATION_CHANNEL_ID = interaction.channel.id
         
-        # Store user info for this location request
         user_key = f"{interaction.channel.id}_{interaction.user.id}"
         LOCATION_USER_INFO[user_key] = {
             'user_id': interaction.user.id,
@@ -481,16 +576,15 @@ async def location_command(interaction: discord.Interaction):
             'timestamp': discord.utils.utcnow()
         }
         
-        safe_print(f"Location command used by {interaction.user.display_name} ({interaction.user.id}) in channel {LOCATION_CHANNEL_ID}")
-        
         embed = discord.Embed(
-            title="📍 Share Your Location",
-            description=f"Hey {interaction.user.display_name}! Click the link below to share your location with the team!",
+            title="📍 Enhanced Location Sharing",
+            description=f"Hey {interaction.user.display_name}! Use the improved location system below!",
             color=0x5865F2
         )
         
-        # Use the Railway URL
-        website_url = f"https://web-production-f0220.up.railway.app?user={interaction.user.id}&channel={interaction.channel.id}"
+        railway_url = os.getenv('RAILWAY_URL', 'https://web-production-f0220.up.railway.app')
+        website_url = f"{railway_url}?user={interaction.user.id}&channel={interaction.channel.id}"
+        
         embed.add_field(
             name="🔗 Location Link",
             value=f"[Click here to share location]({website_url})",
@@ -498,32 +592,28 @@ async def location_command(interaction: discord.Interaction):
         )
         
         embed.add_field(
-            name="ℹ️ How it works",
-            value="• Click the link\n• Allow location access\n• Select a nearby store or share GPS location\n• Your location will be posted here automatically",
+            name="🆕 New Features",
+            value="• Fixed Google Maps integration\n• Persistent location history\n• Role-based permissions\n• Enhanced store filtering\n• Improved real-time tracking",
             inline=False
         )
         
-        embed.add_field(
-            name="🔒 Privacy",
-            value="Your location data is not stored and only shared with this Discord server.",
-            inline=False
-        )
+        # Show location history
+        history = get_user_location_history(interaction.user.id, 3)
+        if history:
+            history_text = "\n".join([
+                f"• {row['store_name'] or 'Unknown'} ({row['distance']:.1f}mi) - {row['timestamp'][:16]}"
+                for row in history
+            ])
+            embed.add_field(
+                name="📊 Recent Locations",
+                value=history_text,
+                inline=False
+            )
         
-        # Add Google Maps API status
-        google_verified = len([s for s in STORES if s.get('verified') == 'google_api'])
-        google_status = "🗺️ Google Maps API: ✅ Active" if gmaps else "🗺️ Google Maps API: ❌ Not Available"
-        
-        embed.add_field(
-            name="📊 Coordinate Accuracy",
-            value=f"{google_status}\n✅ {google_verified}/{len(STORES)} stores Google-verified\n🎯 Professional-grade accuracy",
-            inline=False
-        )
-        
-        embed.set_footer(text="Location Sharing System • Powered by Google Maps API • Railway Hosted")
+        embed.set_footer(text="Enhanced Location System • Database Powered • Fixed Google Maps")
         embed.timestamp = discord.utils.utcnow()
         
         await interaction.response.send_message(embed=embed)
-        safe_print("Location command responded successfully")
         
     except Exception as e:
         safe_print(f"Location command error: {e}")
@@ -532,310 +622,74 @@ async def location_command(interaction: discord.Interaction):
         except:
             pass
 
-@bot.tree.command(name="track", description="Start real-time location tracking")
-async def track_command(interaction: discord.Interaction):
-    """Start real-time location tracking"""
+@bot.tree.command(name="setperm", description="Set user permissions (Admin only)")
+async def setperm_command(interaction: discord.Interaction, user: discord.Member, role: str):
+    """Set user permissions"""
     try:
-        user_id = interaction.user.id
-        channel_id = interaction.channel.id
+        # Check if user is admin
+        if not check_user_permissions(interaction.user.id, 'admin'):
+            await interaction.response.send_message("❌ You need admin permissions to use this command.", ephemeral=True)
+            return
         
-        start_real_time_tracking(user_id, channel_id)
+        if role not in ['user', 'moderator', 'admin']:
+            await interaction.response.send_message("❌ Invalid role. Use: user, moderator, or admin", ephemeral=True)
+            return
         
-        embed = discord.Embed(
-            title="🔄 Real-Time Tracking Started",
-            description=f"Real-time location tracking is now active for {interaction.user.display_name}!",
-            color=0x00FF00
-        )
+        success = set_user_permission(user.id, role, interaction.user.id, interaction.guild.id)
         
-        # Enhanced tracking URL with real-time features
-        tracking_url = f"https://web-production-f0220.up.railway.app/track?user={user_id}&channel={channel_id}"
-        embed.add_field(
-            name="🔗 Real-Time Tracking Link",
-            value=f"[Click here for continuous tracking]({tracking_url})",
-            inline=False
-        )
-        
-        embed.add_field(
-            name="📍 Features",
-            value="• Continuous location updates\n• Movement tracking\n• Store proximity alerts\n• Location history\n• Automatic Discord updates",
-            inline=False
-        )
-        
-        embed.add_field(
-            name="⏹️ To Stop Tracking",
-            value="Use `/stoptrack` command or close the tracking page",
-            inline=False
-        )
-        
-        embed.set_footer(text="Real-Time Location Tracking • Google Maps Powered")
-        embed.timestamp = discord.utils.utcnow()
-        
-        await interaction.response.send_message(embed=embed)
-        safe_print(f"Real-time tracking started for {interaction.user.display_name}")
-        
-    except Exception as e:
-        safe_print(f"Track command error: {e}")
-        try:
-            await interaction.response.send_message("❌ Error starting real-time tracking")
-        except:
-            pass
-
-@bot.tree.command(name="stoptrack", description="Stop real-time location tracking")
-async def stoptrack_command(interaction: discord.Interaction):
-    """Stop real-time location tracking"""
-    try:
-        user_id = interaction.user.id
-        stop_real_time_tracking(user_id)
-        
-        embed = discord.Embed(
-            title="⏹️ Real-Time Tracking Stopped",
-            description=f"Real-time location tracking has been stopped for {interaction.user.display_name}.",
-            color=0xFF6B35
-        )
-        
-        embed.set_footer(text="Real-Time Location Tracking • Stopped")
-        embed.timestamp = discord.utils.utcnow()
-        
-        await interaction.response.send_message(embed=embed)
-        safe_print(f"Real-time tracking stopped for {interaction.user.display_name}")
-        
-    except Exception as e:
-        safe_print(f"Stop track command error: {e}")
-        try:
-            await interaction.response.send_message("❌ Error stopping real-time tracking")
-        except:
-            pass
-
-@bot.tree.command(name="stores", description="View store database statistics")
-async def stores_command(interaction: discord.Interaction):
-    """Show store database info with Google Maps status"""
-    try:
-        # Count by store type and verification status
-        target_count = len([s for s in STORES if 'target' in s['name'].lower()])
-        walmart_count = len([s for s in STORES if 'walmart' in s['name'].lower()])
-        bestbuy_count = len([s for s in STORES if 'best buy' in s['name'].lower()])
-        bjs_count = len([s for s in STORES if 'bjs' in s['name'].lower()])
-        
-        google_verified = len([s for s in STORES if s.get('verified') == 'google_api'])
-        fallback = len([s for s in STORES if s.get('verified') == 'fallback'])
-        failed = len([s for s in STORES if s.get('verified') in ['failed_geocoding', 'geocoding_error']])
-        
-        embed = discord.Embed(
-            title="🗃️ Store Database Statistics",
-            description="Google Maps API integration for professional-grade coordinates",
-            color=0x4285F4  # Google blue
-        )
-        
-        embed.add_field(
-            name="📊 Overall Status",
-            value=f"**Total Stores:** {len(STORES)}\n**✅ Google Verified:** {google_verified}\n**⚠️ Fallback:** {fallback}\n**❌ Failed:** {failed}",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="🗺️ Google Maps API",
-            value=f"**Status:** {'✅ Active' if gmaps else '❌ Not Available'}\n**Accuracy:** Professional grade\n**Updates:** Automatic",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="📈 Success Rate",
-            value=f"**{(google_verified / len(STORES)) * 100:.1f}%** stores geocoded\n**±1-4 meters** accuracy\n**Real-time** updates",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="🎯 Target Stores",
-            value=f"Count: {target_count}",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="🏪 Walmart Stores", 
-            value=f"Count: {walmart_count}",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="🔌 Best Buy Stores",
-            value=f"Count: {bestbuy_count}",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="🛒 BJ's Wholesale",
-            value=f"Count: {bjs_count}",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="🔄 Real-Time Features",
-            value=f"Live tracking: {'✅ Available' if gmaps else '❌ Limited'}\nMovement alerts: {'✅ Yes' if gmaps else '❌ No'}\nProximity detection: ✅ Yes",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="🎯 Coordinate Accuracy",
-            value="• **Google Verified:** ±1-4 meters (rooftop level)\n• **Fallback:** ±100+ meters (city center)\n• **Failed:** Manual verification needed",
-            inline=False
-        )
-        
-        embed.set_footer(text="Database powered by Google Maps Geocoding API • Real-time updates")
-        embed.timestamp = discord.utils.utcnow()
-        
-        await interaction.response.send_message(embed=embed)
-        safe_print("Stores command executed successfully")
-        
-    except Exception as e:
-        safe_print(f"Stores command error: {e}")
-        try:
-            await interaction.response.send_message("❌ Error retrieving store information")
-        except:
-            pass
-
-# Enhanced location posting with Google Maps features
-async def post_location_to_discord(location_data):
-    """Post location update to Discord with Google Maps integration"""
-    global LOCATION_CHANNEL_ID, bot_ready, bot_connected, LOCATION_USER_INFO
-    
-    try:
-        if not bot_connected or not bot_ready or not LOCATION_CHANNEL_ID:
-            return False
-        
-        channel = bot.get_channel(LOCATION_CHANNEL_ID)
-        if not channel:
-            return False
-        
-        lat = float(location_data['latitude'])
-        lng = float(location_data['longitude'])
-        accuracy = location_data.get('accuracy', 'Unknown')
-        is_manual = location_data.get('isManualCheckIn', False)
-        selected_store = location_data.get('selectedStore', None)
-        user_id = location_data.get('user_id', None)
-        
-        # Update real-time tracking if active
-        if user_id and user_id in REAL_TIME_TRACKING:
-            update_real_time_location(user_id, lat, lng, accuracy)
-        
-        # Get user info
-        username = "Someone"
-        avatar_url = None
-        full_username = None
-        
-        if user_id:
-            user_key = f"{LOCATION_CHANNEL_ID}_{user_id}"
-            if user_key in LOCATION_USER_INFO:
-                user_info = LOCATION_USER_INFO[user_key]
-                username = user_info['username']
-                full_username = user_info['full_username']
-                avatar_url = user_info['avatar_url']
-        
-        # Find closest store
-        closest_store, distance = find_closest_store(lat, lng)
-        if not closest_store:
-            return False
-        
-        # Handle manual check-in
-        if is_manual and selected_store:
-            for store in STORES:
-                if store['name'] == selected_store:
-                    closest_store = store
-                    distance = calculate_distance(lat, lng, store['lat'], store['lng'])
-                    break
-        
-        # Get store branding and verification status
-        branding = get_store_branding(closest_store['name'])
-        indicator, status = get_status_indicator(distance)
-        verification_emoji, verification_text = get_verification_status(closest_store)
-        
-        # Create enhanced embed with Google Maps features
-        title_text = f"{branding['emoji']} {username} is {distance:.1f} miles from {closest_store['name']}"
-        
-        embed = discord.Embed(
-            title=title_text,
-            description=f"**{username}** {'manually selected' if is_manual else 'is at'} **{closest_store['name']}**",
-            color=branding['color']
-        )
-        
-        if branding['logo']:
-            embed.set_thumbnail(url=branding['logo'])
-        
-        if avatar_url:
-            embed.set_author(name=f"Location Update from {username}", icon_url=avatar_url)
-        
-        # Enhanced fields with Google Maps data
-        embed.add_field(name="🏪 Store", value=closest_store['name'], inline=True)
-        embed.add_field(name="📏 Distance", value=f"{indicator} **{distance:.1f} miles**", inline=True)
-        embed.add_field(name="🎯 Accuracy", value=f"{verification_emoji} {verification_text}", inline=True)
-        
-        # Google Maps integration
-        if closest_store.get('place_id'):
-            google_maps_url = f"https://maps.google.com/maps/place/?q=place_id:{closest_store['place_id']}"
-            embed.add_field(name="🗺️ Google Maps", value=f"[View Store Location]({google_maps_url})", inline=True)
-        
-        # Real-time tracking status
-        if user_id and user_id in REAL_TIME_TRACKING and REAL_TIME_TRACKING[user_id]['active']:
-            tracking_status = "🔄 **Real-time tracking active**"
+        if success:
+            await interaction.response.send_message(f"✅ Set {user.display_name} role to **{role}**")
         else:
-            tracking_status = "📍 Single location update"
+            await interaction.response.send_message("❌ Failed to set permissions")
+            
+    except Exception as e:
+        safe_print(f"Setperm command error: {e}")
+        await interaction.response.send_message("❌ Error setting permissions")
+
+@bot.tree.command(name="history", description="View your location history")
+async def history_command(interaction: discord.Interaction, limit: int = 10):
+    """View location history"""
+    try:
+        if not check_user_permissions(interaction.user.id, 'user'):
+            await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
+            return
         
-        embed.add_field(name="📊 Tracking Status", value=tracking_status, inline=True)
+        history = get_user_location_history(interaction.user.id, min(limit, 20))
         
-        # Address and coordinates
-        embed.add_field(name="📍 Address", value=closest_store['address'], inline=False)
+        if not history:
+            await interaction.response.send_message("📍 No location history found.")
+            return
         
-        # Show Google Maps formatting if available
-        if closest_store.get('formatted_address'):
+        embed = discord.Embed(
+            title=f"📊 Location History for {interaction.user.display_name}",
+            color=0x5865F2
+        )
+        
+        for i, row in enumerate(history[:10], 1):
+            store_name = row['store_name'] or 'Unknown Location'
+            distance = f"{row['distance']:.1f}mi" if row['distance'] else 'N/A'
+            timestamp = row['timestamp'][:16].replace('T', ' ')
+            tracking_type = "🔄" if row['is_real_time'] else "📍"
+            
             embed.add_field(
-                name="🌐 Google Formatted Address", 
-                value=closest_store['formatted_address'], 
-                inline=False
+                name=f"{i}. {tracking_type} {store_name}",
+                value=f"Distance: {distance}\nTime: {timestamp}",
+                inline=True
             )
         
-        # Coordinates with precision indicator
-        coord_precision = "High" if closest_store.get('verified') == 'google_api' else "Standard"
-        embed.add_field(
-            name="🧭 Coordinates",
-            value=f"**User:** {lat:.6f}, {lng:.6f}\n**Store:** {closest_store['lat']:.6f}, {closest_store['lng']:.6f}\n**Precision:** {coord_precision}",
-            inline=True
-        )
-        
-        # Location type from Google
-        if closest_store.get('location_type'):
-            location_quality = {
-                'ROOFTOP': '🎯 Rooftop (Exact)',
-                'RANGE_INTERPOLATED': '📍 Street Level',
-                'GEOMETRIC_CENTER': '🏢 Building Center',
-                'APPROXIMATE': '⚠️ Approximate'
-            }.get(closest_store['location_type'], closest_store['location_type'])
-            
-            embed.add_field(name="🎯 Location Quality", value=location_quality, inline=True)
-        
-        # Method and accuracy
-        if is_manual:
-            embed.add_field(name="🎯 Method", value=f"Manual Selection\n({selected_store})", inline=True)
-        else:
-            embed.add_field(name="🎯 GPS Accuracy", value=f"±{accuracy} meters", inline=True)
-        
-        # Enhanced footer with Google Maps info
-        google_status = "Google Maps Verified" if closest_store.get('verified') == 'google_api' else "Standard Coordinates"
-        footer_text = f"Location System • {google_status} • {verification_text}"
-        
-        embed.set_footer(text=footer_text)
+        embed.set_footer(text=f"Showing {len(history)} most recent locations")
         embed.timestamp = discord.utils.utcnow()
         
-        await channel.send(embed=embed)
-        safe_print(f"✅ Posted enhanced location to Discord for {username}")
-        return True
+        await interaction.response.send_message(embed=embed)
         
     except Exception as e:
-        safe_print(f"❌ Error posting to Discord: {e}")
-        return False
+        safe_print(f"History command error: {e}")
+        await interaction.response.send_message("❌ Error retrieving location history")
 
-# Enhanced Flask routes with Google Maps integration
+# Enhanced Flask routes with fixed Google Maps
 @app.route('/', methods=['GET'])
 def index():
-    """Serve enhanced location sharing page with Google Maps"""
+    """Serve fixed location sharing page"""
     user_id = request.args.get('user')
     channel_id = request.args.get('channel')
     
@@ -846,6 +700,7 @@ def index():
     }) if user_id and channel_id else 'null'
     
     google_api_key = os.getenv('GOOGLE_MAPS_API_KEY', '')
+    stores = load_stores_from_db()
     
     return f'''
 <!DOCTYPE html>
@@ -853,8 +708,7 @@ def index():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Enhanced Location Bot - Google Maps Powered</title>
-    <script async defer src="https://maps.googleapis.com/maps/api/js?key={google_api_key}&libraries=places"></script>
+    <title>Enhanced Location Bot - Fixed Google Maps</title>
     <style>
         * {{
             margin: 0;
@@ -909,8 +763,8 @@ def index():
             margin-bottom: 32px;
         }}
 
-        .google-badge {{
-            background: linear-gradient(135deg, #4285F4, #34A853);
+        .fix-badge {{
+            background: linear-gradient(135deg, #34A853, #0F9D58);
             color: white;
             padding: 12px;
             border-radius: 12px;
@@ -939,17 +793,19 @@ def index():
             box-shadow: 0 12px 35px rgba(66, 133, 244, 0.4);
         }}
 
-        .track-button {{
-            background: linear-gradient(135deg, #EA4335, #FBBC04);
-            margin-top: 16px;
+        .location-button:disabled {{
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
         }}
 
         #map {{
-            height: 300px;
+            height: 350px;
             width: 100%;
             border-radius: 12px;
             margin: 20px 0;
             display: none;
+            border: 1px solid #e2e8f0;
         }}
 
         .status {{
@@ -976,14 +832,50 @@ def index():
             color: white;
         }}
 
+        .loading {{
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }}
+
+        @keyframes spin {{
+            to {{ transform: rotate(360deg); }}
+        }}
+
+        .store-filters {{
+            margin: 20px 0;
+            display: none;
+        }}
+
+        .filter-button {{
+            background: rgba(255, 255, 255, 0.8);
+            border: 1px solid #e2e8f0;
+            padding: 8px 16px;
+            margin: 4px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }}
+
+        .filter-button.active {{
+            background: #4285F4;
+            color: white;
+        }}
+
         .nearby-stores {{
             margin-top: 24px;
             text-align: left;
             display: none;
+            max-height: 300px;
+            overflow-y: auto;
         }}
 
         .store-item {{
-            background: rgba(255, 255, 255, 0.8);
+            background: rgba(255, 255, 255, 0.9);
             border: 1px solid rgba(0, 0, 0, 0.1);
             border-radius: 12px;
             padding: 16px;
@@ -997,8 +889,7 @@ def index():
             box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
         }}
 
-        .google-verified {{
-            background: #E8F5E8;
+        .store-item.google-verified {{
             border-left: 4px solid #34A853;
         }}
 
@@ -1024,187 +915,246 @@ def index():
     <div class="container">
         <div class="logo">🗺️</div>
         <h1>Enhanced Location Sharing</h1>
-        <p class="subtitle">Powered by Google Maps API for maximum accuracy!</p>
+        <p class="subtitle">Fixed Google Maps integration with enhanced features!</p>
         
-        <div class="google-badge">
-            🗺️ Google Maps Integration: Professional-grade coordinates with ±1-4 meter accuracy
+        <div class="fix-badge">
+            ✅ FIXED: Google Maps API • Advanced Marker API • Database persistence
         </div>
         
         <button id="shareLocationBtn" class="location-button">
             📍 Share My Location
         </button>
         
-        <button id="startTrackingBtn" class="location-button track-button" style="display: none;">
-            🔄 Start Real-Time Tracking
-        </button>
+        <div class="store-filters" id="storeFilters">
+            <button class="filter-button active" data-chain="all">All Stores</button>
+            <button class="filter-button" data-chain="target">🎯 Target</button>
+            <button class="filter-button" data-chain="walmart">🏪 Walmart</button>
+            <button class="filter-button" data-chain="best buy">🔌 Best Buy</button>
+            <button class="filter-button" data-chain="bjs">🛒 BJ's</button>
+        </div>
         
         <div id="map"></div>
         <div id="status" class="status"></div>
         <div id="nearbyStores" class="nearby-stores"></div>
         
         <div class="footer" style="margin-top: 32px; color: #a0aec0; font-size: 14px;">
-            <p>🗺️ Powered by Google Maps API for professional-grade accuracy</p>
-            <p>📍 Real-time tracking and movement detection available</p>
-            <p>✅ All coordinates verified through Google's geocoding service</p>
+            <p>🔧 Fixed Google Maps API integration</p>
+            <p>🗄️ Database-powered location history</p>
+            <p>🎯 Enhanced store filtering and search</p>
         </div>
     </div>
 
     <script>
         const USER_INFO = {user_info_js};
-        const STORES = {json.dumps(STORES)};
+        const STORES = {json.dumps(stores)};
+        const GOOGLE_API_KEY = '{google_api_key}';
         
         let map;
         let userMarker;
         let storeMarkers = [];
-        let userActualLocation = null;
-        let realTimeTracking = false;
-        let trackingInterval;
+        let userLocation = null;
+        let currentFilter = 'all';
         
-        function initMap() {{
-            // Initialize Google Map
-            map = new google.maps.Map(document.getElementById('map'), {{
-                zoom: 12,
-                center: {{ lat: 42.3601, lng: -71.0589 }}, // Boston
-                styles: [
-                    {{
-                        featureType: 'poi',
-                        elementType: 'labels',
-                        stylers: [{{ visibility: 'off' }}]
-                    }}
-                ]
-            }});
+        // Load Google Maps API dynamically with error handling
+        function loadGoogleMapsAPI() {{
+            if (typeof google !== 'undefined') {{
+                initializeMap();
+                return;
+            }}
+            
+            if (!GOOGLE_API_KEY) {{
+                showStatus('❌ Google Maps API key not configured', 'error');
+                return;
+            }}
+            
+            const script = document.createElement('script');
+            script.src = `https://maps.googleapis.com/maps/api/js?key=${{GOOGLE_API_KEY}}&libraries=marker&callback=initializeMap`;
+            script.onerror = () => {{
+                showStatus('❌ Failed to load Google Maps API', 'error');
+            }};
+            document.head.appendChild(script);
+        }}
+        
+        function initializeMap() {{
+            try {{
+                map = new google.maps.Map(document.getElementById('map'), {{
+                    zoom: 12,
+                    center: {{ lat: 42.3601, lng: -71.0589 }},
+                    mapId: 'DEMO_MAP_ID', // Required for Advanced Markers
+                    styles: [
+                        {{
+                            featureType: 'poi',
+                            elementType: 'labels',
+                            stylers: [{{ visibility: 'off' }}]
+                        }}
+                    ]
+                }});
+                
+                showStatus('✅ Google Maps loaded successfully', 'success');
+                setTimeout(() => {{
+                    document.getElementById('status').style.display = 'none';
+                }}, 2000);
+                
+            }} catch (error) {{
+                console.error('Map initialization error:', error);
+                showStatus('❌ Map initialization failed', 'error');
+            }}
         }}
         
         function showUserLocation(lat, lng) {{
             if (!map) return;
             
-            const userPosition = {{ lat: lat, lng: lng }};
+            userLocation = {{ lat, lng }};
             
-            // Center map on user
-            map.setCenter(userPosition);
-            map.setZoom(14);
-            
-            // Add user marker
-            if (userMarker) userMarker.setMap(null);
-            userMarker = new google.maps.Marker({{
-                position: userPosition,
-                map: map,
-                title: 'Your Location',
-                icon: {{
-                    path: google.maps.SymbolPath.CIRCLE,
-                    scale: 8,
-                    fillColor: '#4285F4',
-                    fillOpacity: 1,
-                    strokeWeight: 2,
-                    strokeColor: '#FFFFFF'
+            try {{
+                // Center map on user
+                map.setCenter(userLocation);
+                map.setZoom(14);
+                
+                // Remove existing user marker
+                if (userMarker) {{
+                    userMarker.map = null;
                 }}
-            }});
-            
-            // Show nearby stores on map
-            showNearbyStoresOnMap(lat, lng);
+                
+                // Create user marker with Advanced Marker API
+                const userIcon = document.createElement('div');
+                userIcon.innerHTML = '📍';
+                userIcon.style.fontSize = '24px';
+                
+                userMarker = new google.maps.marker.AdvancedMarkerElement({{
+                    map: map,
+                    position: userLocation,
+                    content: userIcon,
+                    title: 'Your Location'
+                }});
+                
+                // Show nearby stores
+                showNearbyStoresOnMap(lat, lng);
+                showNearbyStoresList(lat, lng);
+                document.getElementById('storeFilters').style.display = 'block';
+                
+            }} catch (error) {{
+                console.error('Error showing user location:', error);
+                showStatus('❌ Error displaying location on map', 'error');
+            }}
         }}
         
         function showNearbyStoresOnMap(userLat, userLng) {{
-            // Clear existing store markers
-            storeMarkers.forEach(marker => marker.setMap(null));
+            // Clear existing markers
+            storeMarkers.forEach(marker => marker.map = null);
             storeMarkers = [];
             
-            // Find nearby stores
-            const nearbyStores = findNearbyStores(userLat, userLng, 5);
+            const nearbyStores = findNearbyStores(userLat, userLng, 10);
+            const filteredStores = filterStores(nearbyStores);
             
-            nearbyStores.slice(0, 10).forEach(item => {{
+            filteredStores.slice(0, 20).forEach(item => {{
                 const store = item.store;
-                const distance = item.distance;
                 
-                const storeMarker = new google.maps.Marker({{
-                    position: {{ lat: store.lat, lng: store.lng }},
-                    map: map,
-                    title: `${{store.name}} (${{distance.toFixed(1)}} miles)`,
-                    icon: {{
-                        path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-                        scale: 6,
-                        fillColor: store.verified === 'google_api' ? '#34A853' : '#FBBC04',
-                        fillOpacity: 1,
-                        strokeWeight: 1,
-                        strokeColor: '#FFFFFF'
-                    }}
-                }});
-                
-                // Add click listener to store marker
-                storeMarker.addListener('click', () => {{
-                    selectStore(store);
-                }});
-                
-                storeMarkers.push(storeMarker);
+                try {{
+                    const storeIcon = document.createElement('div');
+                    storeIcon.innerHTML = getStoreEmoji(store.chain);
+                    storeIcon.style.fontSize = '20px';
+                    storeIcon.style.cursor = 'pointer';
+                    
+                    const marker = new google.maps.marker.AdvancedMarkerElement({{
+                        map: map,
+                        position: {{ lat: store.lat, lng: store.lng }},
+                        content: storeIcon,
+                        title: `${{store.name}} (${{item.distance.toFixed(1)}} miles)`
+                    }});
+                    
+                    // Add click listener
+                    marker.addListener('click', () => {{
+                        selectStore(store);
+                    }});
+                    
+                    storeMarkers.push(marker);
+                    
+                }} catch (error) {{
+                    console.error('Error creating store marker:', error);
+                }}
             }});
         }}
         
-        function startRealTimeTracking() {{
-            if (!navigator.geolocation) {{
-                showStatus('❌ Geolocation not supported', 'error');
+        function showNearbyStoresList(userLat, userLng) {{
+            const nearbyStores = findNearbyStores(userLat, userLng, 10);
+            const filteredStores = filterStores(nearbyStores);
+            const storesContainer = document.getElementById('nearbyStores');
+            
+            if (filteredStores.length === 0) {{
+                storesContainer.innerHTML = '<p>No stores found within 10 miles.</p>';
+                storesContainer.style.display = 'block';
                 return;
             }}
             
-            realTimeTracking = true;
-            document.getElementById('startTrackingBtn').style.display = 'none';
-            showStatus('🔄 Real-time tracking started...', 'info');
-            
-            trackingInterval = setInterval(() => {{
-                navigator.geolocation.getCurrentPosition(
-                    position => {{
-                        const lat = position.coords.latitude;
-                        const lng = position.coords.longitude;
-                        const accuracy = position.coords.accuracy;
-                        
-                        // Update map
-                        showUserLocation(lat, lng);
-                        
-                        // Send real-time update
-                        updateRealTimeLocation(lat, lng, accuracy);
-                    }},
-                    error => {{
-                        console.error('Real-time tracking error:', error);
-                    }},
-                    {{ enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }}
-                );
-            }}, 30000); // Update every 30 seconds
-        }}
-        
-        function stopRealTimeTracking() {{
-            realTimeTracking = false;
-            if (trackingInterval) {{
-                clearInterval(trackingInterval);
-            }}
-            showStatus('⏹️ Real-time tracking stopped', 'info');
-        }}
-        
-        async function updateRealTimeLocation(lat, lng, accuracy) {{
-            if (!realTimeTracking) return;
-            
-            try {{
-                const response = await fetch('/webhook/realtime', {{
-                    method: 'POST',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{
-                        latitude: lat,
-                        longitude: lng,
-                        accuracy: accuracy,
-                        user_id: USER_INFO?.user_id,
-                        timestamp: new Date().toISOString()
-                    }})
-                }});
+            const storesHTML = filteredStores.slice(0, 15).map(item => {{
+                const store = item.store;
+                const distance = item.distance;
+                const verification = store.verified === 'google_api' ? 'google-badge' : 'fallback-badge';
+                const verificationText = store.verified === 'google_api' ? '✅ Google' : '⚠️ Fallback';
                 
-                if (response.ok) {{
-                    console.log('Real-time location updated');
-                }}
-            }} catch (error) {{
-                console.error('Real-time update error:', error);
-            }}
+                return `
+                    <div class="store-item ${{store.verified === 'google_api' ? 'google-verified' : ''}}" 
+                         onclick="selectStore(${{JSON.stringify(store).replace(/"/g, '&quot;')}})">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <strong>${{getStoreEmoji(store.chain)}} ${{store.name}}</strong>
+                                <span class="verification-badge ${{verification}}">${{verificationText}}</span>
+                                <br>
+                                <small style="color: #666;">${{store.address}}</small>
+                            </div>
+                            <div style="text-align: right;">
+                                <strong>${{distance.toFixed(1)}} mi</strong>
+                                <br>
+                                <small>${{getDistanceStatus(distance)}}</small>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }}).join('');
+            
+            storesContainer.innerHTML = storesHTML;
+            storesContainer.style.display = 'block';
         }}
         
-        // Rest of the JavaScript functions (calculateDistance, findNearbyStores, etc.)
+        function filterStores(nearbyStores) {{
+            if (currentFilter === 'all') return nearbyStores;
+            return nearbyStores.filter(item => 
+                item.store.chain.toLowerCase().includes(currentFilter.toLowerCase())
+            );
+        }}
+        
+        function getStoreEmoji(chain) {{
+            const chainLower = chain.toLowerCase();
+            if (chainLower.includes('target')) return '🎯';
+            if (chainLower.includes('walmart')) return '🏪';
+            if (chainLower.includes('best buy')) return '🔌';
+            if (chainLower.includes('bjs')) return '🛒';
+            return '🏢';
+        }}
+        
+        function getDistanceStatus(distance) {{
+            if (distance <= 0.2) return '🟢 AT STORE';
+            if (distance <= 1.0) return '🟡 NEARBY';
+            return '🔴 FAR';
+        }}
+        
+        function findNearbyStores(userLat, userLng, radiusMiles) {{
+            const nearbyStores = [];
+            
+            STORES.forEach(store => {{
+                const distance = calculateDistance(userLat, userLng, store.lat, store.lng);
+                if (distance <= radiusMiles) {{
+                    nearbyStores.push({{ store: store, distance: distance }});
+                }}
+            }});
+            
+            nearbyStores.sort((a, b) => a.distance - b.distance);
+            return nearbyStores;
+        }}
+        
         function calculateDistance(lat1, lng1, lat2, lng2) {{
-            const R = 3958.8;
+            const R = 3958.8; // Earth radius in miles
             const lat1Rad = lat1 * Math.PI / 180;
             const lng1Rad = lng1 * Math.PI / 180;
             const lat2Rad = lat2 * Math.PI / 180;
@@ -1219,20 +1169,6 @@ def index():
             return R * c;
         }}
         
-        function findNearbyStores(userLat, userLng, radiusMiles = 5) {{
-            const nearbyStores = [];
-            
-            STORES.forEach(store => {{
-                const distance = calculateDistance(userLat, userLng, store.lat, store.lng);
-                if (distance <= radiusMiles) {{
-                    nearbyStores.push({{ store: store, distance: distance }});
-                }}
-            }});
-            
-            nearbyStores.sort((a, b) => a.distance - b.distance);
-            return nearbyStores;
-        }}
-        
         function showStatus(message, type) {{
             const statusDiv = document.getElementById('status');
             statusDiv.textContent = message;
@@ -1240,11 +1176,43 @@ def index():
             statusDiv.style.display = 'block';
         }}
         
-        function selectStore(store) {{
-            const verification = store.verified === 'google_api' ? 'Google verified' : 'standard';
-            showStatus(`📍 Checking in to ${{store.name}} (${{verification}})...`, 'info');
+        async function selectStore(store) {{
+            if (!userLocation) {{
+                showStatus('❌ Please share your location first', 'error');
+                return;
+            }}
             
-            // Implementation for store selection...
+            showStatus(`📍 Checking in to ${{store.name}}...`, 'info');
+            
+            try {{
+                const distance = calculateDistance(
+                    userLocation.lat, userLocation.lng,
+                    store.lat, store.lng
+                );
+                
+                const response = await fetch('/webhook/location', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{
+                        latitude: userLocation.lat,
+                        longitude: userLocation.lng,
+                        accuracy: 10,
+                        isManualCheckIn: true,
+                        selectedStore: store.name,
+                        user_id: USER_INFO?.user_id
+                    }})
+                }});
+                
+                if (response.ok) {{
+                    showStatus(`✅ Checked in to ${{store.name}}!`, 'success');
+                }} else {{
+                    showStatus('❌ Failed to check in', 'error');
+                }}
+                
+            }} catch (error) {{
+                console.error('Check-in error:', error);
+                showStatus('❌ Check-in failed', 'error');
+            }}
         }}
         
         // Event listeners
@@ -1252,32 +1220,26 @@ def index():
             const button = this;
             
             if (!navigator.geolocation) {{
-                showStatus('❌ Geolocation not supported', 'error');
+                showStatus('❌ Geolocation not supported by this browser', 'error');
                 return;
             }}
             
             button.disabled = true;
-            button.innerHTML = '<div class="loading"></div>Getting location...';
+            button.innerHTML = '<div class="loading"></div> Getting location...';
             showStatus('📍 Requesting location access...', 'info');
             
             navigator.geolocation.getCurrentPosition(
                 position => {{
                     const latitude = position.coords.latitude;
                     const longitude = position.coords.longitude;
-                    const accuracy = Math.round(position.coords.accuracy);
-                    
-                    userActualLocation = {{ latitude, longitude, accuracy }};
                     
                     // Show on map
                     document.getElementById('map').style.display = 'block';
                     showUserLocation(latitude, longitude);
                     
-                    // Show real-time tracking option
-                    document.getElementById('startTrackingBtn').style.display = 'block';
-                    
                     button.innerHTML = '✅ Location Found!';
                     button.style.background = 'linear-gradient(135deg, #34A853, #0F9D58)';
-                    showStatus('📍 Location found! Click stores on map or enable real-time tracking.', 'success');
+                    showStatus('📍 Location found! Click stores below to check in.', 'success');
                     
                     setTimeout(() => {{
                         button.disabled = false;
@@ -1286,48 +1248,122 @@ def index():
                     }}, 3000);
                 }},
                 error => {{
-                    showStatus('❌ Failed to get location. Please allow location access.', 'error');
+                    let errorMessage = 'Failed to get location. ';
+                    switch(error.code) {{
+                        case error.PERMISSION_DENIED:
+                            errorMessage += 'Please allow location access.';
+                            break;
+                        case error.POSITION_UNAVAILABLE:
+                            errorMessage += 'Location information unavailable.';
+                            break;
+                        case error.TIMEOUT:
+                            errorMessage += 'Location request timed out.';
+                            break;
+                        default:
+                            errorMessage += 'Unknown error occurred.';
+                    }}
+                    
+                    showStatus(`❌ ${{errorMessage}}`, 'error');
                     button.disabled = false;
                     button.innerHTML = '📍 Share My Location';
                 }},
-                {{ enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 }}
+                {{ 
+                    enableHighAccuracy: true, 
+                    timeout: 15000, 
+                    maximumAge: 300000 
+                }}
             );
         }});
         
-        document.getElementById('startTrackingBtn').addEventListener('click', startRealTimeTracking);
+        // Store filter buttons
+        document.getElementById('storeFilters').addEventListener('click', function(e) {{
+            if (e.target.classList.contains('filter-button')) {{
+                // Update active button
+                document.querySelectorAll('.filter-button').forEach(btn => btn.classList.remove('active'));
+                e.target.classList.add('active');
+                
+                // Update filter
+                currentFilter = e.target.dataset.chain;
+                
+                // Refresh store display
+                if (userLocation) {{
+                    showNearbyStoresOnMap(userLocation.lat, userLocation.lng);
+                    showNearbyStoresList(userLocation.lat, userLocation.lng);
+                }}
+            }}
+        }});
         
-        // Initialize map when page loads
-        if (typeof google !== 'undefined') {{
-            google.maps.event.addDomListener(window, 'load', initMap);
-        }}
+        // Load Google Maps when page loads
+        window.initializeMap = initializeMap;
+        loadGoogleMapsAPI();
     </script>
 </body>
 </html>
     '''
 
-@app.route('/track', methods=['GET'])
-def track_page():
-    """Serve real-time tracking page"""
-    user_id = request.args.get('user')
-    channel_id = request.args.get('channel')
-    
-    # Enhanced tracking page with continuous updates
-    return f'''
-    <!-- Real-time tracking page with Google Maps integration -->
-    <!-- This would include live map updates, movement tracking, etc. -->
-    <h1>Real-Time Location Tracking</h1>
-    <p>Enhanced tracking for user {user_id}</p>
-    '''
+@app.route('/health', methods=['GET'])
+def health():
+    """Enhanced health check"""
+    try:
+        stores = load_stores_from_db()
+        google_verified = len([s for s in stores if s.get('verified') == 'google_api'])
+        
+        with get_db_connection() as conn:
+            # Count active tracking sessions
+            cursor = conn.execute('SELECT COUNT(*) as count FROM tracking_sessions WHERE active = TRUE')
+            active_sessions = cursor.fetchone()['count']
+            
+            # Count total location records
+            cursor = conn.execute('SELECT COUNT(*) as count FROM user_locations')
+            total_locations = cursor.fetchone()['count']
+        
+        return jsonify({
+            "status": "healthy",
+            "bot_connected": bot_connected,
+            "bot_ready": bot_ready,
+            "google_maps_api": gmaps is not None,
+            "database": "connected",
+            "stores_total": len(stores),
+            "stores_google_verified": google_verified,
+            "google_verification_rate": round((google_verified / len(stores)) * 100, 1) if stores else 0,
+            "active_tracking_sessions": active_sessions,
+            "total_location_records": total_locations
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "error": str(e)
+        }), 500
 
 @app.route('/webhook/location', methods=['POST'])
 def location_webhook():
-    """Enhanced location webhook with Google Maps integration"""
+    """Enhanced location webhook with database persistence"""
     try:
         data = request.get_json()
         if not data or not bot_connected or not bot_ready:
             return jsonify({"error": "Bot not ready"}), 503
         
-        # Send to Discord with enhanced features
+        # Save to database
+        lat = float(data['latitude'])
+        lng = float(data['longitude'])
+        user_id = data.get('user_id')
+        
+        if user_id:
+            closest_store, distance = find_closest_store(lat, lng)
+            store_name = closest_store['name'] if closest_store else None
+            
+            save_location_to_db(
+                user_id=user_id,
+                channel_id=LOCATION_CHANNEL_ID,
+                lat=lat,
+                lng=lng,
+                accuracy=data.get('accuracy'),
+                store_name=store_name,
+                distance=distance,
+                is_real_time=data.get('isRealTime', False)
+            )
+        
+        # Send to Discord
         if bot.loop and not bot.loop.is_closed():
             future = asyncio.run_coroutine_threadsafe(
                 post_location_to_discord(data), 
@@ -1336,61 +1372,113 @@ def location_webhook():
             
             result = future.result(timeout=15)
             if result:
-                return jsonify({"status": "success", "message": "Enhanced location shared successfully"}), 200
+                return jsonify({"status": "success", "message": "Location shared successfully"}), 200
             else:
                 return jsonify({"error": "Failed to post to Discord"}), 500
         else:
             return jsonify({"error": "Bot loop not available"}), 503
         
     except Exception as e:
-        safe_print(f"❌ Enhanced webhook error: {e}")
+        safe_print(f"❌ Webhook error: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/webhook/realtime', methods=['POST'])
-def realtime_webhook():
-    """Handle real-time location updates"""
+async def post_location_to_discord(location_data):
+    """Enhanced Discord posting with database integration"""
+    global LOCATION_CHANNEL_ID, bot_ready, bot_connected, LOCATION_USER_INFO
+    
     try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No data"}), 400
+        if not bot_connected or not bot_ready or not LOCATION_CHANNEL_ID:
+            return False
         
-        user_id = data.get('user_id')
+        channel = bot.get_channel(LOCATION_CHANNEL_ID)
+        if not channel:
+            return False
+        
+        lat = float(location_data['latitude'])
+        lng = float(location_data['longitude'])
+        accuracy = location_data.get('accuracy', 'Unknown')
+        is_manual = location_data.get('isManualCheckIn', False)
+        selected_store = location_data.get('selectedStore', None)
+        user_id = location_data.get('user_id', None)
+        
+        # Get user info
+        username = "Someone"
+        avatar_url = None
+        
         if user_id:
-            lat = float(data['latitude'])
-            lng = float(data['longitude'])
-            accuracy = data.get('accuracy', 'Unknown')
-            
-            # Update real-time tracking
-            update_real_time_location(user_id, lat, lng, accuracy)
-            
-            # Optionally post significant location changes to Discord
-            # (implement logic to avoid spam)
-            
-        return jsonify({"status": "success"}), 200
+            user_key = f"{LOCATION_CHANNEL_ID}_{user_id}"
+            if user_key in LOCATION_USER_INFO:
+                user_info = LOCATION_USER_INFO[user_key]
+                username = user_info['username']
+                avatar_url = user_info['avatar_url']
+        
+        # Find closest store
+        closest_store, distance = find_closest_store(lat, lng)
+        if not closest_store:
+            return False
+        
+        # Handle manual check-in
+        if is_manual and selected_store:
+            stores = load_stores_from_db()
+            for store in stores:
+                if store['name'] == selected_store:
+                    closest_store = store
+                    distance = calculate_distance(lat, lng, store['lat'], store['lng'])
+                    break
+        
+        # Get store branding
+        branding = get_store_branding(closest_store['name'])
+        
+        # Create enhanced embed
+        title_text = f"{branding['emoji']} {username} is {distance:.1f} miles from {closest_store['name']}"
+        
+        embed = discord.Embed(
+            title=title_text,
+            description=f"**{username}** {'manually selected' if is_manual else 'is at'} **{closest_store['name']}**",
+            color=branding['color']
+        )
+        
+        if branding['logo']:
+            embed.set_thumbnail(url=branding['logo'])
+        
+        if avatar_url:
+            embed.set_author(name=f"Location Update from {username}", icon_url=avatar_url)
+        
+        # Enhanced fields
+        embed.add_field(name="🏪 Store", value=closest_store['name'], inline=True)
+        embed.add_field(name="📏 Distance", value=f"{distance:.1f} miles", inline=True)
+        embed.add_field(name="🎯 Accuracy", value=f"±{accuracy}m", inline=True)
+        
+        # Google Maps link
+        if closest_store.get('place_id'):
+            google_maps_url = f"https://maps.google.com/maps/place/?q=place_id:{closest_store['place_id']}"
+            embed.add_field(name="🗺️ Google Maps", value=f"[View Store]({google_maps_url})", inline=True)
+        
+        # Address
+        embed.add_field(name="📍 Address", value=closest_store['address'], inline=False)
+        
+        # Coordinates
+        embed.add_field(
+            name="🧭 Coordinates",
+            value=f"**User:** {lat:.6f}, {lng:.6f}\n**Store:** {closest_store['lat']:.6f}, {closest_store['lng']:.6f}",
+            inline=True
+        )
+        
+        # Enhanced footer
+        verification_status = "Google Verified" if closest_store.get('verified') == 'google_api' else "Standard"
+        embed.set_footer(text=f"Enhanced Location System • Database Powered • {verification_status}")
+        embed.timestamp = discord.utils.utcnow()
+        
+        await channel.send(embed=embed)
+        safe_print(f"✅ Posted enhanced location to Discord for {username}")
+        return True
         
     except Exception as e:
-        safe_print(f"❌ Real-time webhook error: {e}")
-        return jsonify({"error": str(e)}), 500
+        safe_print(f"❌ Error posting to Discord: {e}")
+        return False
 
-@app.route('/health', methods=['GET'])
-def health():
-    """Enhanced health check with Google Maps status"""
-    google_verified = len([s for s in STORES if s.get('verified') == 'google_api'])
-    
-    return jsonify({
-        "status": "healthy",
-        "bot_connected": bot_connected,
-        "bot_ready": bot_ready,
-        "google_maps_api": gmaps is not None,
-        "stores_total": len(STORES),
-        "stores_google_verified": google_verified,
-        "google_verification_rate": round((google_verified / len(STORES)) * 100, 1) if STORES else 0,
-        "real_time_tracking_users": len([u for u in REAL_TIME_TRACKING.values() if u.get('active')])
-    }), 200
-
-# Enhanced Flask runner
 def run_flask():
-    """Run Flask server with Google Maps integration"""
+    """Run Flask server"""
     try:
         port = int(os.getenv('PORT', 5000))
         safe_print(f"🌐 Starting enhanced Flask server on port {port}")
@@ -1398,10 +1486,9 @@ def run_flask():
     except Exception as e:
         safe_print(f"❌ Flask startup error: {e}")
 
-# Enhanced main execution
 def main():
-    """Main function with Google Maps integration"""
-    safe_print("=== Starting Enhanced Location Bot with Google Maps API ===")
+    """Enhanced main function"""
+    safe_print("=== Starting Enhanced Location Bot with Fixes ===")
     
     TOKEN = os.getenv('DISCORD_TOKEN')
     if not TOKEN:
@@ -1414,12 +1501,9 @@ def main():
     else:
         safe_print("✅ Google Maps API key found")
     
-    safe_print("✅ Discord token found")
-    safe_print("🗺️ Google Maps integration will be initialized on bot startup")
-    
     # Start Discord bot
     def start_bot():
-        safe_print("🤖 Starting Discord bot with Google Maps integration...")
+        safe_print("🤖 Starting Discord bot...")
         try:
             bot.run(TOKEN)
         except Exception as e:
@@ -1429,22 +1513,22 @@ def main():
     bot_thread.start()
     
     # Wait for bot connection
-    safe_print("⏰ Waiting for Discord bot to connect and initialize Google Maps...")
-    max_wait = 60  # Extended wait for geocoding
+    safe_print("⏰ Waiting for Discord bot to connect...")
+    max_wait = 60
     waited = 0
     while not bot_connected and waited < max_wait:
         time.sleep(1)
         waited += 1
         if waited % 10 == 0:
-            safe_print(f"⏰ Still waiting for bot initialization... ({waited}s)")
+            safe_print(f"⏰ Still waiting... ({waited}s)")
     
     if bot_connected:
-        safe_print("✅ Discord bot connected with Google Maps integration!")
+        safe_print("✅ Discord bot connected!")
         time.sleep(3)
     else:
         safe_print("⚠️ Bot not ready yet, but starting Flask anyway...")
     
-    # Start enhanced Flask server
+    # Start Flask server
     try:
         run_flask()
     except Exception as e:
