@@ -526,7 +526,7 @@ def geocode_store_address(store_data):
         return fallback_store
 
 def initialize_stores():
-    """Initialize store database if empty"""
+    """Initialize store database with fallback coordinates if Google Maps fails"""
     existing_stores = load_stores_from_db()
     
     if existing_stores:
@@ -536,13 +536,59 @@ def initialize_stores():
     safe_print("📍 Initializing store database...")
     geocoded_stores = []
     
+    # Fallback coordinates for major Mass cities if Google Maps fails
+    fallback_coords = {
+        "Abington": (42.1065, -70.9453),
+        "Boston": (42.3601, -71.0589),
+        "Braintree": (42.2065, -71.0022),
+        "Burlington": (42.5047, -71.2956),
+        "Cambridge": (42.3736, -71.1097),
+        "Danvers": (42.5751, -70.9300),
+        "Dedham": (42.2418, -71.1661),
+        "Dorchester": (42.3118, -71.0653),
+        "Everett": (42.4084, -71.0537),
+        "Framingham": (42.2793, -71.4162),
+        "Worcester": (42.2626, -71.8023),
+        "Springfield": (42.1015, -72.5898),
+        "Lowell": (42.6334, -71.3162),
+        "Quincy": (42.2529, -71.0023),
+        "Brockton": (42.0834, -71.0184)
+    }
+    
     for i, store_data in enumerate(STORE_ADDRESSES, 1):
-        safe_print(f"[{i}/{len(STORE_ADDRESSES)}] Geocoding: {store_data['name']}")
-        geocoded_store = geocode_store_address(store_data)
-        geocoded_stores.append(geocoded_store)
+        safe_print(f"[{i}/{len(STORE_ADDRESSES)}] Processing: {store_data['name']}")
         
         if gmaps:
+            # Try Google Maps geocoding
+            geocoded_store = geocode_store_address(store_data)
             time.sleep(0.1)  # Rate limiting
+        else:
+            # Use fallback coordinates
+            city_name = store_data['address'].split(',')[1].strip() if ',' in store_data['address'] else store_data['name'].split()[-1]
+            
+            # Find closest matching city
+            coords = None
+            for city, coord in fallback_coords.items():
+                if city.lower() in city_name.lower():
+                    coords = coord
+                    break
+            
+            if not coords:
+                coords = (42.3601, -71.0589)  # Default to Boston
+            
+            geocoded_store = {
+                **store_data,
+                "lat": coords[0],
+                "lng": coords[1],
+                "verified": "fallback_coordinates",
+                "geocoded_date": datetime.utcnow().isoformat(),
+                "place_id": None,
+                "location_type": "APPROXIMATE",
+                "formatted_address": store_data['address']
+            }
+            save_store_to_db(geocoded_store)
+        
+        geocoded_stores.append(geocoded_store)
     
     safe_print(f"✅ Initialized {len(geocoded_stores)} stores")
     return geocoded_stores
@@ -680,15 +726,127 @@ async def on_ready():
 # Enhanced slash commands with permissions
 @bot.tree.command(name="ping", description="Test if bot is working")
 async def ping(interaction: discord.Interaction):
-    """Test command"""
+    """Enhanced ping with detailed status"""
     try:
         google_status = "✅ Active" if gmaps else "❌ Not Available"
         stores = load_stores_from_db()
-        await interaction.response.send_message(
-            f"🏓 Pong! Bot is working!\n🗺️ Google Maps API: {google_status}\n📍 Stores: {len(stores)}"
+        google_verified = len([s for s in stores if s.get('verified') == 'google_api'])
+        fallback_coords = len([s for s in stores if s.get('verified') == 'fallback_coordinates'])
+        
+        embed = discord.Embed(
+            title="🏓 Bot Status",
+            description="System health check",
+            color=0x00FF00 if gmaps and stores else 0xFFAA00
         )
+        
+        embed.add_field(
+            name="🤖 Discord Bot",
+            value="✅ Connected" if bot_connected else "❌ Disconnected",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="🗺️ Google Maps API",
+            value=google_status,
+            inline=True
+        )
+        
+        embed.add_field(
+            name="📍 Total Stores",
+            value=f"{len(stores)} stores loaded",
+            inline=True
+        )
+        
+        if stores:
+            embed.add_field(
+                name="✅ Google Verified",
+                value=f"{google_verified} stores",
+                inline=True
+            )
+            
+            embed.add_field(
+                name="⚠️ Fallback Coordinates", 
+                value=f"{fallback_coords} stores",
+                inline=True
+            )
+            
+            embed.add_field(
+                name="📊 Success Rate",
+                value=f"{(google_verified / len(stores)) * 100:.1f}%" if stores else "0%",
+                inline=True
+            )
+        
+        # API Key status
+        api_key = os.getenv('GOOGLE_MAPS_API_KEY')
+        api_status = "🔑 Configured" if api_key else "❌ Missing"
+        embed.add_field(
+            name="🔐 API Key Status",
+            value=api_status,
+            inline=True
+        )
+        
+        embed.set_footer(text="Enhanced Location Bot • Railway Hosted")
+        embed.timestamp = discord.utils.utcnow()
+        
+        await interaction.response.send_message(embed=embed)
+        safe_print("Enhanced ping command executed successfully")
+        
     except Exception as e:
         safe_print(f"Ping command error: {e}")
+        await interaction.response.send_message("❌ Error checking bot status")
+
+@bot.tree.command(name="forceinit", description="Force reinitialize store database (Admin only)")
+async def forceinit_command(interaction: discord.Interaction):
+    """Force reinitialize the store database"""
+    try:
+        if not check_user_permissions(interaction.user.id, 'admin'):
+            await interaction.response.send_message("❌ You need admin permissions to use this command.", ephemeral=True)
+            return
+        
+        await interaction.response.defer()  # This will take time
+        
+        # Clear existing database
+        with get_db_connection() as conn:
+            conn.execute('DELETE FROM stores')
+        
+        safe_print("🗑️ Cleared existing store database")
+        
+        # Reinitialize
+        stores = initialize_stores()
+        
+        google_verified = len([s for s in stores if s.get('verified') == 'google_api'])
+        fallback = len([s for s in stores if s.get('verified') in ['fallback_coordinates', 'fallback']])
+        
+        embed = discord.Embed(
+            title="🔄 Database Reinitialized",
+            description="Store database has been rebuilt",
+            color=0x00FF00
+        )
+        
+        embed.add_field(
+            name="📊 Results",
+            value=f"**Total:** {len(stores)} stores\n**Google Verified:** {google_verified}\n**Fallback:** {fallback}",
+            inline=False
+        )
+        
+        if google_verified > 0:
+            embed.add_field(
+                name="✅ Google Maps",
+                value=f"{(google_verified/len(stores)*100):.1f}% success rate",
+                inline=True
+            )
+        else:
+            embed.add_field(
+                name="⚠️ Fallback Mode",
+                value="Using approximate coordinates",
+                inline=True
+            )
+        
+        await interaction.followup.send(embed=embed)
+        
+    except Exception as e:
+        safe_print(f"Force init command error: {e}")
+        await interaction.followup.send("❌ Error reinitializing database")
 
 @bot.tree.command(name="location", description="Share your location with the team")
 async def location_command(interaction: discord.Interaction):
