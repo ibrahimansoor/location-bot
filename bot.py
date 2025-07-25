@@ -358,27 +358,13 @@ class StoreConfig:
     search_terms: List[str] = None
 
 def get_comprehensive_store_database():
-    """Streamlined store database - only essential stores for fast check-ins"""
+    """Focused store database - only Target, Walmart, BJ's, and Costco for fast check-ins"""
     return [
-        # Major Retail Stores (Priority 1) - Fast check-ins
+        # Primary stores (Priority 1) - Exactly what you want
         StoreConfig("Target", "Target", "🎯", "Department", 1, ["Target", "Target Store"]),
         StoreConfig("Walmart", "Walmart", "🏪", "Superstore", 1, ["Walmart", "Walmart Supercenter"]),
-        StoreConfig("Best Buy", "Best Buy", "🔌", "Electronics", 1, ["Best Buy"]),
         StoreConfig("BJ's Wholesale Club", "BJs", "🛒", "Wholesale", 1, ["BJ's", "BJs"]),
         StoreConfig("Costco", "Costco", "🏬", "Wholesale", 1, ["Costco"]),
-        
-        # Hardware Stores (Priority 1) - Common check-ins
-        StoreConfig("Home Depot", "Home Depot", "🔨", "Hardware", 1, ["Home Depot", "The Home Depot"]),
-        StoreConfig("Lowe's", "Lowes", "🏠", "Hardware", 1, ["Lowe's", "Lowes"]),
-        
-        # Major Department Stores (Priority 2) - Secondary options
-        StoreConfig("Macy's", "Macys", "👗", "Department", 2, ["Macy's", "Macys"]),
-        StoreConfig("Kohl's", "Kohls", "🛍️", "Department", 2, ["Kohl's", "Kohls"]),
-        StoreConfig("Sam's Club", "Sams Club", "🛍️", "Wholesale", 2, ["Sam's Club", "Sams"]),
-        
-        # Electronics (Priority 2) - Tech stores
-        StoreConfig("Apple Store", "Apple", "📱", "Electronics", 2, ["Apple Store", "Apple"]),
-        StoreConfig("Micro Center", "Micro Center", "💻", "Electronics", 2, ["Micro Center"]),
     ]
 
 def initialize_google_maps():
@@ -2058,17 +2044,19 @@ def enhanced_index():
             showStatus('🔍 Searching for nearby stores...', 'info');
             try {{
                 const requestData = {{ latitude: lat, longitude: lng, radius: 5, user_id: USER_INFO?.user_id }};
+                console.log('Searching stores with data:', requestData);
                 const response = await fetch('/api/search-stores', {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }}, body: JSON.stringify(requestData) }});
                 if (!response.ok) throw new Error(`Search failed: ${{response.status}}`);
                 
                 const data = await response.json();
+                console.log('Store search response:', data);
                 nearbyStores = data.stores || [];
                 showStatus(`✅ Found ${{nearbyStores.length}} stores nearby`, 'success');
                 displayStoresList();
                 setTimeout(() => hideStatus(), 3000);
             }} catch (error) {{
                 console.error('Store search error:', error);
-                showStatus('❌ Failed to search for stores', 'error');
+                showStatus('❌ Failed to search for stores: ' + error.message, 'error');
             }}
         }}
         
@@ -2148,13 +2136,40 @@ def enhanced_index():
             
             showStatus(`📍 Checking in to ${{store.name}}...`, 'info');
             try {{
-                const checkInData = {{ latitude: userLocation.lat, longitude: userLocation.lng, accuracy: 10, isManualCheckIn: true, selectedStore: store, user_id: USER_INFO?.user_id }};
+                const checkInData = {{ 
+                    latitude: userLocation.lat, 
+                    longitude: userLocation.lng, 
+                    accuracy: 10, 
+                    isManualCheckIn: true, 
+                    selectedStore: store, 
+                    user_id: USER_INFO?.user_id,
+                    session_id: USER_INFO?.session_id,
+                    channel_id: USER_INFO?.channel_id
+                }};
+                console.log('Sending check-in data:', checkInData);
                 const response = await fetch('/webhook/location', {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }}, body: JSON.stringify(checkInData) }});
-                if (response.ok) showStatus(`✅ Checked in to ${{store.name}}!`, 'success');
-                else showStatus('❌ Failed to check in', 'error');
+                const responseData = await response.json();
+                console.log('Check-in response:', responseData);
+                if (response.ok) {{
+                    showStatus(`✅ Checked in to ${{store.name}}! Posted to Discord.`, 'success');
+                    // Hide the store list after successful check-in
+                    const storesContainer = document.getElementById('nearbyStores');
+                    if (storesContainer) {{
+                        storesContainer.innerHTML = `
+                            <div style="text-align: center; padding: 40px; background: rgba(255,255,255,0.1); border-radius: 12px; margin: 20px 0;">
+                                <div style="font-size: 48px; margin-bottom: 16px;">✅</div>
+                                <h3>Check-in Complete!</h3>
+                                <p>Successfully checked in to ${{store.name}}</p>
+                                <p>Your check-in has been posted to Discord.</p>
+                            </div>
+                        `;
+                    }}
+                }} else {{
+                    showStatus(`❌ Failed to check in: ${{responseData.error || 'Unknown error'}}`, 'error');
+                }}
             }} catch (error) {{
                 console.error('Check-in error:', error);
-                showStatus('❌ Check-in failed', 'error');
+                showStatus('❌ Check-in failed: ' + error.message, 'error');
             }}
         }}
         
