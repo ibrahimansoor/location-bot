@@ -41,9 +41,8 @@ intents.guilds = True
 intents.guild_messages = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# Google Maps and Weather clients
+# Google Maps client
 gmaps = None
-WEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY')
 
 # Enhanced database configuration
 DATABASE_PATH = 'enhanced_location_bot.db'
@@ -462,37 +461,7 @@ def initialize_google_maps():
         gmaps = None
         return False
 
-async def get_weather_data(lat: float, lng: float) -> Optional[Dict]:
-    """Get weather data for location"""
-    if not WEATHER_API_KEY:
-        return None
-    
-    try:
-        url = "http://api.openweathermap.org/data/2.5/weather"
-        params = {
-            'lat': lat,
-            'lon': lng,
-            'appid': WEATHER_API_KEY,
-            'units': 'imperial'  # Fahrenheit for US users
-        }
-        
-        response = requests.get(url, params=params, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            return {
-                'temperature': round(data['main']['temp']),
-                'feels_like': round(data['main']['feels_like']),
-                'description': data['weather'][0]['description'].title(),
-                'humidity': data['main']['humidity'],
-                'icon': data['weather'][0]['icon'],
-                'visibility': data.get('visibility', 0) / 1000,  # Convert to miles
-                'wind_speed': data.get('wind', {}).get('speed', 0),
-                'timestamp': datetime.utcnow().isoformat()
-            }
-    except Exception as e:
-        handle_error(e, "Weather API request")
-    
-    return None
+
 
 def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 16000, 
                                  category: str = None, max_stores_per_type: int = 4) -> List[Dict]:
@@ -991,16 +960,7 @@ def format_phone_number(phone: str) -> str:
     else:
         return phone  # Return original if not standard US format
 
-def get_weather_icon(icon_code: str) -> str:
-    """Get weather emoji from icon code"""
-    icon_map = {
-        '01d': '☀️', '01n': '🌙', '02d': '⛅', '02n': '☁️',
-        '03d': '☁️', '03n': '☁️', '04d': '☁️', '04n': '☁️',
-        '09d': '🌦️', '09n': '🌧️', '10d': '🌦️', '10n': '🌧️',
-        '11d': '⛈️', '11n': '⛈️', '13d': '❄️', '13n': '❄️',
-        '50d': '🌫️', '50n': '🌫️'
-    }
-    return icon_map.get(icon_code, '🌤️')
+
 
 # Enhanced bot commands
 @bot.tree.command(name="ping", description="Check bot status and performance metrics")
@@ -1074,12 +1034,10 @@ async def ping_command(interaction: discord.Interaction):
         error_id = handle_error(e, "Ping command")
         await interaction.response.send_message(f"❌ Error checking bot status (ID: {error_id})")
 
-@bot.tree.command(name="location", description="Start enhanced real-time location sharing")
-async def location_command(interaction: discord.Interaction, 
-                          session_name: str = None, 
-                          max_participants: int = 10):
-    """Enhanced location sharing with session management"""
-    global LOCATION_CHANNEL_ID, LOCATION_USER_INFO, ACTIVE_SESSIONS
+@bot.tree.command(name="location", description="Start simple location sharing")
+async def location_command(interaction: discord.Interaction):
+    """Simple location sharing for store check-ins"""
+    global LOCATION_CHANNEL_ID, LOCATION_USER_INFO
     
     try:
         if not check_user_permissions(interaction.user.id, 'user'):
@@ -1088,21 +1046,6 @@ async def location_command(interaction: discord.Interaction,
         
         LOCATION_CHANNEL_ID = interaction.channel.id
         session_id = str(uuid.uuid4())
-        
-        # Create location session
-        with db_pool.get_connection() as conn:
-            conn.execute('''
-                INSERT INTO location_sessions 
-                (session_id, channel_id, guild_id, created_by, session_name, max_participants)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (
-                session_id,
-                str(interaction.channel.id),
-                str(interaction.guild.id) if interaction.guild else None,
-                str(interaction.user.id),
-                session_name or f"{interaction.user.display_name}'s Location",
-                max_participants
-            ))
         
         # Store user info
         user_key = f"{interaction.channel.id}_{interaction.user.id}"
@@ -1115,16 +1058,9 @@ async def location_command(interaction: discord.Interaction,
             'session_id': session_id
         }
         
-        ACTIVE_SESSIONS[session_id] = {
-            'channel_id': interaction.channel.id,
-            'created_by': interaction.user.id,
-            'participants': {interaction.user.id: user_key},
-            'created_at': datetime.utcnow()
-        }
-        
         embed = discord.Embed(
-            title="🔍 Enhanced Location Sharing Session",
-            description=f"**{session_name or 'Location Session'}** created by {interaction.user.display_name}",
+            title="📍 Location Sharing",
+            description=f"**{interaction.user.display_name}** wants to share their location",
             color=0x5865F2
         )
         
@@ -1132,28 +1068,18 @@ async def location_command(interaction: discord.Interaction,
         website_url = f"{railway_url}?session={session_id}&user={interaction.user.id}&channel={interaction.channel.id}"
         
         embed.add_field(
-            name="🔗 Enhanced Location Portal",
-            value=f"[Click here for advanced location sharing]({website_url})",
+            name="🔗 Location Portal",
+            value=f"[Click here to share your location]({website_url})",
             inline=False
         )
         
-        features = [
-            "🔍 Real-time Google Places search",
-            "🌤️ Live weather information",
-            "⭐ Save favorite locations",
-            "👥 Group location sharing",
-            "📊 Location analytics",
-            "🎯 Smart store recommendations"
-        ]
-        embed.add_field(name="✨ Enhanced Features", value="\n".join(features), inline=False)
-        
         embed.add_field(
-            name="👥 Session Info",
-            value=f"**Session ID:** `{session_id[:8]}...`\n**Max Participants:** {max_participants}",
-            inline=True
+            name="ℹ️ How it works",
+            value="1. Click the link above\n2. Allow location access\n3. Select a store to check in\n4. Your check-in will be posted here",
+            inline=False
         )
         
-        embed.set_footer(text="Enhanced Location System • Google Places + Weather API")
+        embed.set_footer(text="Location Bot • Simple store check-ins")
         embed.timestamp = discord.utils.utcnow()
         
         await interaction.response.send_message(embed=embed)
@@ -1163,8 +1089,7 @@ async def location_command(interaction: discord.Interaction,
             "location_session_created",
             {
                 "session_id": session_id,
-                "session_name": session_name,
-                "max_participants": max_participants
+                "simplified": True
             },
             guild_id=interaction.guild.id if interaction.guild else None,
             session_id=session_id
@@ -1491,8 +1416,7 @@ def enhanced_index():
         'channel_id': channel_id,
         'category': category,
         'radius': int(radius),
-        'google_maps_available': gmaps is not None,
-        'weather_available': WEATHER_API_KEY is not None
+        'google_maps_available': gmaps is not None
     }) if user_id and channel_id else 'null'
     
     google_api_key = os.getenv('GOOGLE_MAPS_API_KEY', '')
@@ -1503,12 +1427,9 @@ def enhanced_index():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Enhanced Location Bot Portal</title>
-    <link rel="manifest" href="/static/manifest.json">
-    <meta name="theme-color" content="#4285F4">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
+    <title>Location Bot Portal</title>
+    <meta name="theme-color" content="#5865F2">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📍</text></svg>">
     
     <style>
         :root {{
@@ -1728,19 +1649,7 @@ def enhanced_index():
             color: white; 
         }}
         
-        .weather-widget {{
-            background: var(--glass-bg);
-            backdrop-filter: blur(15px);
-            border: 1px solid var(--glass-border);
-            border-radius: 16px;
-            padding: 20px;
-            margin: 20px 0;
-            display: none;
-        }}
-        
-        .dark-mode .weather-widget {{
-            background: rgba(255, 255, 255, 0.05);
-        }}
+
         
         .nearby-stores {{ 
             margin-top: 30px; 
@@ -1825,15 +1734,7 @@ def enhanced_index():
             font-weight: 500;
         }}
         
-        .favorites-panel {{
-            background: var(--glass-bg);
-            backdrop-filter: blur(15px);
-            border: 1px solid var(--glass-border);
-            border-radius: 16px;
-            padding: 20px;
-            margin: 20px 0;
-            display: none;
-        }}
+
         
         .loading-spinner {{
             display: inline-block;
@@ -1875,70 +1776,58 @@ def enhanced_index():
     </button>
     
     <div class="container">
-        <div class="logo">🔍</div>
-        <h1>Enhanced Location Portal</h1>
-        <p class="subtitle">Advanced location sharing with real-time data and smart features</p>
+        <div class="logo">📍</div>
+        <h1>Location Portal</h1>
+        <p class="subtitle">Simple store check-ins for Discord</p>
         
         <div class="enhanced-badge">
-            🚀 ENHANCED: Real-time Google Places • Weather • Analytics • Group Sharing
+            📍 Simple store check-ins with real-time location
         </div>
         
         <div class="features-grid">
             <div class="feature-card">
-                <div style="font-size: 24px; margin-bottom: 10px;">🔍</div>
-                <h3>Smart Search</h3>
-                <p>AI-powered store discovery with real-time data</p>
+                <div style="font-size: 24px; margin-bottom: 10px;">📍</div>
+                <h3>Real-time Location</h3>
+                <p>Get your current location instantly</p>
             </div>
             <div class="feature-card">
-                <div style="font-size: 24px; margin-bottom: 10px;">🌤️</div>
-                <h3>Weather Info</h3>
-                <p>Current weather conditions for your location</p>
+                <div style="font-size: 24px; margin-bottom: 10px;">🏪</div>
+                <h3>Store Check-ins</h3>
+                <p>Find and check in to nearby stores</p>
             </div>
             <div class="feature-card">
-                <div style="font-size: 24px; margin-bottom: 10px;">⭐</div>
-                <h3>Favorites</h3>
-                <p>Save and manage your favorite locations</p>
+                <div style="font-size: 24px; margin-bottom: 10px;">📱</div>
+                <h3>Simple & Fast</h3>
+                <p>Quick and easy check-in process</p>
             </div>
             <div class="feature-card">
-                <div style="font-size: 24px; margin-bottom: 10px;">👥</div>
-                <h3>Group Sharing</h3>
-                <p>Share locations with multiple friends</p>
+                <div style="font-size: 24px; margin-bottom: 10px;">💬</div>
+                <h3>Discord Integration</h3>
+                <p>Posts directly to your Discord channel</p>
             </div>
         </div>
         
         <div class="action-buttons">
             <button id="shareLocationBtn" class="btn">
-                📍 Start Location Sharing
-            </button>
-            <button id="searchStoresBtn" class="btn btn-secondary">
-                🔍 Search Stores
-            </button>
-            <button id="viewFavoritesBtn" class="btn btn-secondary">
-                ⭐ View Favorites
+                📍 Share Location
             </button>
         </div>
         
-        <div id="weatherWidget" class="weather-widget">
-            <h3>🌤️ Current Weather</h3>
-            <div id="weatherData"></div>
-        </div>
+
         
         <div id="map"></div>
         <div id="status" class="status"></div>
         
-        <div id="favoritesPanel" class="favorites-panel">
-            <h3>⭐ Your Favorite Locations</h3>
-            <div id="favoritesList"></div>
-        </div>
+
         
         <div id="nearbyStores" class="nearby-stores"></div>
         
         <div class="footer-info">
-            <p><strong>Enhanced Features:</strong></p>
-            <p>🔍 Real-time Google Places search with 50+ store types</p>
-            <p>🌤️ Live weather data from OpenWeather API</p>
-            <p>📊 Advanced analytics and usage insights</p>
-            <p>⭐ Smart recommendations based on your preferences</p>
+            <p><strong>Simple & Fast:</strong></p>
+            <p>📍 Real-time location sharing</p>
+            <p>🏪 Quick store check-ins</p>
+            <p>💬 Direct Discord integration</p>
+            <p>📱 Mobile-friendly interface</p>
         </div>
     </div>
 
@@ -1960,8 +1849,6 @@ def enhanced_index():
         
         function setupEventListeners() {{
             document.getElementById('shareLocationBtn').addEventListener('click', shareLocation);
-            document.getElementById('searchStoresBtn').addEventListener('click', searchStores);
-            document.getElementById('viewFavoritesBtn').addEventListener('click', viewFavorites);
         }}
         
         function checkDarkModePreference() {{
@@ -2024,7 +1911,6 @@ def enhanced_index():
                 userLocation = {{ lat: latitude, lng: longitude }};
                 
                 showUserLocation(latitude, longitude);
-                await loadWeatherData(latitude, longitude);
                 await searchNearbyStores(latitude, longitude);
                 
                 button.innerHTML = '✅ Location Shared!';
@@ -2063,42 +1949,7 @@ def enhanced_index():
             document.getElementById('map').style.display = 'block';
         }}
         
-        async function loadWeatherData(lat, lng) {{
-            if (!USER_INFO?.weather_available) return;
-            try {{
-                const response = await fetch(`/api/weather?lat=${{lat}}&lng=${{lng}}`);
-                if (response.ok) {{
-                    const data = await response.json();
-                    currentWeather = data.weather;
-                    displayWeatherWidget();
-                }}
-            }} catch (error) {{ console.warn('Weather data unavailable:', error); }}
-        }}
-        
-        function displayWeatherWidget() {{
-            if (!currentWeather) return;
-            const weatherWidget = document.getElementById('weatherWidget');
-            const weatherData = document.getElementById('weatherData');
-            if (!weatherWidget || !weatherData) return;
-            
-            const weather = currentWeather;
-            weatherData.innerHTML = `
-                <div style="display: flex; align-items: center; gap: 15px;">
-                    <div style="font-size: 48px;">${{getWeatherIcon(weather.icon)}}</div>
-                    <div>
-                        <div style="font-size: 24px; font-weight: bold;">${{weather.temperature}}°F</div>
-                        <div style="opacity: 0.8;">${{weather.description}}</div>
-                        <div style="font-size: 14px; opacity: 0.6;">Feels like ${{weather.feels_like}}°F • ${{weather.humidity}}% humidity</div>
-                    </div>
-                </div>
-            `;
-            weatherWidget.style.display = 'block';
-        }}
-        
-        function getWeatherIcon(iconCode) {{
-            const iconMap = {{ '01d': '☀️', '01n': '🌙', '02d': '⛅', '02n': '☁️', '03d': '☁️', '03n': '☁️', '04d': '☁️', '04n': '☁️', '09d': '🌦️', '09n': '🌧️', '10d': '🌦️', '10n': '🌧️', '11d': '⛈️', '11n': '⛈️', '13d': '❄️', '13n': '❄️', '50d': '🌫️', '50n': '🌫️' }};
-            return iconMap[iconCode] || '🌤️';
-        }}
+
         
         async function searchNearbyStores(lat, lng) {{
             showStatus('🔍 Searching for nearby stores...', 'info');
@@ -2157,8 +2008,6 @@ def enhanced_index():
         
         function createStoreItemHTML(store) {{
             const distance = store.distance.toFixed(1);
-            const rating = store.rating ? `⭐ ${{store.rating}}` : '';
-            const ratingCount = store.rating_count ? `(${{store.rating_count.toLocaleString()}})` : '';
             
             return `
                 <div class="store-item google-verified" onclick="selectStore('${{store.place_id}}')">
@@ -2168,7 +2017,6 @@ def enhanced_index():
                             <div style="color: #666; font-size: 14px; margin: 4px 0;">${{store.address}}</div>
                             <div class="store-details">
                                 <span class="store-badge">📏 ${{distance}} mi</span>
-                                ${{rating ? `<span class="store-badge">${{rating}} ${{ratingCount}}</span>` : ''}}
                             </div>
                         </div>
                         <div style="text-align: right;">
@@ -2190,7 +2038,7 @@ def enhanced_index():
             
             showStatus(`📍 Checking in to ${{store.name}}...`, 'info');
             try {{
-                const checkInData = {{ latitude: userLocation.lat, longitude: userLocation.lng, accuracy: 10, isManualCheckIn: true, selectedStore: store, user_id: USER_INFO?.user_id, weather: currentWeather }};
+                const checkInData = {{ latitude: userLocation.lat, longitude: userLocation.lng, accuracy: 10, isManualCheckIn: true, selectedStore: store, user_id: USER_INFO?.user_id }};
                 const response = await fetch('/webhook/location', {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }}, body: JSON.stringify(checkInData) }});
                 if (response.ok) showStatus(`✅ Checked in to ${{store.name}}!`, 'success');
                 else showStatus('❌ Failed to check in', 'error');
@@ -2203,11 +2051,6 @@ def enhanced_index():
         async function searchStores() {{
             if (!userLocation) {{ showStatus('📍 Please share your location first', 'info'); return; }}
             await searchNearbyStores(userLocation.lat, userLocation.lng);
-        }}
-        
-        async function viewFavorites() {{
-            // Implementation for favorites
-            showStatus('⭐ Favorites feature coming soon!', 'info');
         }}
         
         function showStatus(message, type) {{
@@ -2290,35 +2133,12 @@ def api_search_stores_enhanced():
         error_id = handle_error(e, "Enhanced store search API")
         return jsonify({"error": f"Internal server error (ID: {error_id})"}), 500
 
-@app.route('/api/weather', methods=['GET'])
-@limiter.limit("60 per minute")
-def api_weather():
-    """Weather API endpoint"""
-    try:
-        lat = request.args.get('lat')
-        lng = request.args.get('lng')
-        
-        if not lat or not lng:
-            return jsonify({"error": "Latitude and longitude required"}), 400
-        
-        weather_data = asyncio.run(get_weather_data(float(lat), float(lng)))
-        
-        if weather_data:
-            return jsonify({
-                "status": "success",
-                "weather": weather_data
-            }), 200
-        else:
-            return jsonify({"error": "Weather data not available"}), 503
-            
-    except Exception as e:
-        error_id = handle_error(e, "Weather API")
-        return jsonify({"error": f"Internal server error (ID: {error_id})"}), 500
+
 
 @app.route('/webhook/location', methods=['POST'])
 @limiter.limit("50 per minute")
-def enhanced_location_webhook():
-    """Enhanced location webhook with analytics and weather"""
+def simplified_location_webhook():
+    """Simplified location webhook for store check-ins"""
     try:
         data = request.get_json()
         if not data or not bot_connected or not bot_ready:
@@ -2328,19 +2148,18 @@ def enhanced_location_webhook():
         lng = float(data['longitude'])
         user_id = data['user_id']
         
-        # Get additional data
+        # Get store data
         selected_store_data = data.get('selectedStore')
         session_id = data.get('session_id')
-        weather_data = data.get('weather')
         
-        # Save to database with enhanced data
+        # Save to database with minimal data
         if user_id and selected_store_data:
             with db_pool.get_connection() as conn:
                 conn.execute('''
                     INSERT INTO user_locations 
                     (user_id, channel_id, guild_id, lat, lng, accuracy, store_name, store_address, 
-                     store_place_id, store_category, distance, weather_data, session_id, is_real_time)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     store_place_id, store_category, distance, session_id, is_real_time)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     str(user_id),
                     str(LOCATION_CHANNEL_ID),
@@ -2352,7 +2171,6 @@ def enhanced_location_webhook():
                     selected_store_data.get('place_id'),
                     selected_store_data.get('category'),
                     selected_store_data['distance'],
-                    json.dumps(weather_data) if weather_data else None,
                     session_id,
                     data.get('isRealTime', True)
                 ))
@@ -2368,12 +2186,10 @@ def enhanced_location_webhook():
             if result:
                 log_analytics(
                     user_id,
-                    "location_shared",
+                    "simplified_location_shared",
                     {
                         "store_name": selected_store_data.get('name') if selected_store_data else None,
-                        "category": selected_store_data.get('category') if selected_store_data else None,
                         "distance": selected_store_data.get('distance') if selected_store_data else None,
-                        "has_weather": weather_data is not None,
                         "session_id": session_id
                     },
                     request_obj=request,
@@ -2387,11 +2203,11 @@ def enhanced_location_webhook():
             return jsonify({"error": "Bot loop not available"}), 503
         
     except Exception as e:
-        error_id = handle_error(e, "Enhanced location webhook")
+        error_id = handle_error(e, "Simplified location webhook")
         return jsonify({"error": f"Internal server error (ID: {error_id})"}), 500
 
 async def post_enhanced_location_to_discord(location_data):
-    """Enhanced Discord location posting with rich embeds and analytics"""
+    """Simplified Discord location posting with minimal information"""
     global LOCATION_CHANNEL_ID, bot_ready, bot_connected, LOCATION_USER_INFO
     
     try:
@@ -2408,7 +2224,6 @@ async def post_enhanced_location_to_discord(location_data):
         lng = float(location_data['longitude'])
         selected_store_data = location_data.get('selectedStore', None)
         user_id = location_data.get('user_id', None)
-        weather_data = location_data.get('weather', None)
         session_id = location_data.get('session_id', None)
         
         if not selected_store_data:
@@ -2418,7 +2233,6 @@ async def post_enhanced_location_to_discord(location_data):
         # Get user information
         username = "Someone"
         avatar_url = None
-        guild_name = channel.guild.name if channel.guild else "Direct Message"
         
         if user_id:
             user_key = f"{LOCATION_CHANNEL_ID}_{user_id}"
@@ -2427,178 +2241,88 @@ async def post_enhanced_location_to_discord(location_data):
                 username = user_info['username']
                 avatar_url = user_info['avatar_url']
         
-        # Extract store information
+        # Extract only essential store information
         store_name = selected_store_data['name']
         store_address = selected_store_data['address']
         distance = selected_store_data['distance']
-        chain = selected_store_data['chain']
-        category = selected_store_data.get('category', 'Store')
-        rating = selected_store_data.get('rating')
-        rating_count = selected_store_data.get('rating_count')
-        place_id = selected_store_data.get('place_id')
-        phone = selected_store_data.get('phone')
-        website = selected_store_data.get('website')
-        is_open = selected_store_data.get('is_open')
-        price_level = selected_store_data.get('price_level')
-        quality_score = selected_store_data.get('quality_score', 0)
         
-        # Get store branding
-        branding = get_enhanced_store_branding(chain, category, quality_score)
-        
-        # Create enhanced embed
+        # Create simplified embed with only essential information
         embed = discord.Embed(
-            title=f"{branding['emoji']} {store_name}",
-            description=f"**{username}** checked in • **{distance:.1f} miles** away",
-            color=branding['color']
+            title=f"{username}'s Check-in",
+            description=f"**{store_name}** • **{distance:.1f} miles away**",
+            color=0x5865F2  # Simple blue color
         )
         
         # Set author with user avatar
         if avatar_url:
             embed.set_author(
-                name=f"{username}'s Enhanced Check-in",
+                name=f"{username}",
                 icon_url=avatar_url
             )
         
-        # Store information section
-        store_info = f"**{branding['emoji']} {store_name}**\n"
-        store_info += f"{branding['description']}"
-        if category:
-            store_info += f" • {category}"
-        
+        # Only essential information: store name, address, and distance
         embed.add_field(
-            name="🏪 Store Information",
-            value=store_info,
-            inline=True
-        )
-        
-        # Distance and status
-        distance_info = f"**{distance:.1f} miles** from {username}"
-        if is_open is not None:
-            status_emoji = "🟢 Open" if is_open else "🔴 Closed"
-            distance_info += f"\n{status_emoji}"
-        
-        embed.add_field(
-            name="📏 Location Status",
-            value=distance_info,
-            inline=True
-        )
-        
-        # Rating and reviews
-        if rating and rating_count:
-            rating_info = f"**{rating}/5** ⭐\n{rating_count:,} reviews"
-            if quality_score >= 7:
-                rating_info += "\n🏆 **Top Rated**"
-            elif quality_score >= 5:
-                rating_info += "\n🎯 **Popular Choice**"
-        else:
-            rating_info = "No ratings available"
-        
-        embed.add_field(
-            name="⭐ Customer Rating",
-            value=rating_info,
-            inline=True
-        )
-        
-        # Address with enhanced formatting
-        address_info = f"📍 {store_address}"
-        if phone:
-            # Format phone number nicely
-            formatted_phone = format_phone_number(phone)
-            address_info += f"\n📞 {formatted_phone}"
-        
-        embed.add_field(
-            name="📍 Address & Contact",
-            value=address_info,
+            name="📍 Location",
+            value=f"**{store_name}**\n{store_address}",
             inline=False
         )
         
-        # Weather information (if available)
-        if weather_data:
-            weather_info = f"{get_weather_icon(weather_data.get('icon', ''))} "
-            weather_info += f"**{weather_data['temperature']}°F** • {weather_data['description']}"
-            weather_info += f"\nFeels like {weather_data['feels_like']}°F • {weather_data['humidity']}% humidity"
-            
-            embed.add_field(
-                name="🌤️ Current Weather",
-                value=weather_info,
-                inline=True
-            )
+        embed.add_field(
+            name="📏 Distance",
+            value=f"**{distance:.1f} miles** from {username}",
+            inline=False
+        )
         
-        # Price level indicator
-        if price_level is not None:
-            price_indicators = ["💰 Budget", "💰💰 Moderate", "💰💰💰 Expensive", "💰💰💰💰 Very Expensive"]
-            if 0 <= price_level < len(price_indicators):
-                embed.add_field(
-                    name="💰 Price Level",
-                    value=price_indicators[price_level],
-                    inline=True
-                )
-        
-        # Quick action buttons (if supported)
-        action_buttons = []
-        
-        if place_id:
-            google_maps_url = f"https://maps.google.com/maps/place/?q=place_id:{place_id}"
-            action_buttons.append(f"[🗺️ View on Google Maps]({google_maps_url})")
-        
-        if website:
-            action_buttons.append(f"[🌐 Visit Website]({website})")
-        
-        # Directions link
-        directions_url = f"https://www.google.com/maps/dir/?api=1&destination={lat},{lng}"
-        action_buttons.append(f"[🧭 Get Directions]({directions_url})")
-        
-        if action_buttons:
-            embed.add_field(
-                name="🔗 Quick Actions",
-                value=" • ".join(action_buttons),
-                inline=False
-            )
-        
-        # Enhanced footer with session info
-        footer_text = "Enhanced Location Bot • Real-time Google Places Data"
-        if session_id:
-            footer_text += f" • Session: {session_id[:8]}..."
-        
-        embed.set_footer(text=footer_text)
+        # Simple footer
+        embed.set_footer(text="Location Bot • Real-time check-in")
         embed.timestamp = discord.utils.utcnow()
         
-        # Send the embed
+        # Delete previous embed if it exists
+        try:
+            # Get recent messages from the channel
+            async for message in channel.history(limit=10):
+                # Look for embeds from the same user with location information
+                if (message.author == bot.user and 
+                    message.embeds and 
+                    any("Check-in" in embed.title for embed in message.embeds)):
+                    await message.delete()
+                    safe_print(f"🗑️ Deleted previous check-in embed")
+                    break
+        except Exception as delete_error:
+            safe_print(f"⚠️ Could not delete previous embed: {delete_error}")
+        
+        # Send the new simplified embed
         message = await channel.send(embed=embed)
         
-        # Add reactions for quick feedback
-        reactions = ["👍", "📍", "⭐"]
+        # Add simple reactions
+        reactions = ["👍", "📍"]
         for reaction in reactions:
             try:
                 await message.add_reaction(reaction)
             except:
                 pass  # Ignore reaction failures
         
-        # Update analytics
+        # Log analytics
         analytics_data = {
             "store_name": store_name,
-            "store_category": category,
             "distance": distance,
-            "rating": rating,
-            "has_weather": weather_data is not None,
-            "guild_name": guild_name,
-            "channel_name": channel.name,
-            "quality_score": quality_score
+            "guild_name": channel.guild.name if channel.guild else "Direct Message",
+            "channel_name": channel.name
         }
         
         log_analytics(
             user_id,
-            "enhanced_location_posted",
+            "simplified_location_posted",
             analytics_data,
             guild_id=channel.guild.id if channel.guild else None,
             session_id=session_id
         )
         
-        safe_print(f"✅ Enhanced location posted to Discord for {username} at {store_name}")
+        safe_print(f"✅ Simplified location posted to Discord for {username} at {store_name}")
         return True
         
     except Exception as e:
-        error_id = handle_error(e, "Enhanced Discord posting")
+        error_id = handle_error(e, "Simplified Discord posting")
         safe_print(f"❌ Error posting to Discord: {error_id}")
         return False
 
@@ -2619,10 +2343,7 @@ def enhanced_health_check():
                     "available": gmaps is not None,
                     "api_key_configured": bool(os.getenv('GOOGLE_MAPS_API_KEY'))
                 },
-                "weather": {
-                    "available": WEATHER_API_KEY is not None,
-                    "api_key_configured": bool(WEATHER_API_KEY)
-                },
+
                 "cache": {
                     "type": "redis" if store_cache.redis_client else "memory",
                     "connected": store_cache.redis_client is not None
@@ -2700,10 +2421,7 @@ def main():
     else:
         safe_print("✅ Google Maps API key found")
     
-    if not WEATHER_API_KEY:
-        safe_print("⚠️ OPENWEATHER_API_KEY not found - weather features disabled")
-    else:
-        safe_print("✅ Weather API key found")
+
     
     def start_bot():
         safe_print("🤖 Starting enhanced Discord bot...")
