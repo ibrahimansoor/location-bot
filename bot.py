@@ -1054,12 +1054,14 @@ async def location_command(interaction: discord.Interaction):
                 await channel.send(f"{user.mention} ❌ You don't have permission to use this command.")
             return
         
-        # Get Railway URL
-        railway_url = os.getenv('RAILWAY_URL')
+        # Get Railway URL with correct priority
+        railway_url = os.getenv('RAILWAY_STATIC_URL')  # This has the correct URL
         if not railway_url:
-            railway_url = os.getenv('RAILWAY_STATIC_URL') or os.getenv('PORT') or 'https://web-production-f0220.up.railway.app'
-            if railway_url and not railway_url.startswith('http'):
-                railway_url = f"https://web-production-f0220.up.railway.app"
+            railway_url = os.getenv('RAILWAY_URL') or os.getenv('PORT') or 'https://web-production-f0220.up.railway.app'
+        
+        # Ensure URL has https:// prefix
+        if railway_url and not railway_url.startswith('http'):
+            railway_url = f"https://{railway_url}"
         
         # If still no URL, try to construct from Railway's environment
         if not railway_url or 'your-app' in railway_url:
@@ -1166,12 +1168,14 @@ async def search_command(interaction: discord.Interaction,
                 await channel.send(f"{user.mention} ❌ Radius must be between 1 and 50 miles.")
             return
         
-        # Get Railway URL
-        railway_url = os.getenv('RAILWAY_URL')
+        # Get Railway URL with correct priority
+        railway_url = os.getenv('RAILWAY_STATIC_URL')  # This has the correct URL
         if not railway_url:
-            railway_url = os.getenv('RAILWAY_STATIC_URL') or os.getenv('PORT') or 'https://web-production-f0220.up.railway.app'
-            if railway_url and not railway_url.startswith('http'):
-                railway_url = f"https://web-production-f0220.up.railway.app"
+            railway_url = os.getenv('RAILWAY_URL') or os.getenv('PORT') or 'https://web-production-f0220.up.railway.app'
+        
+        # Ensure URL has https:// prefix
+        if railway_url and not railway_url.startswith('http'):
+            railway_url = f"https://{railway_url}"
         
         # If still no URL, try to construct from Railway's environment
         if not railway_url or 'your-app' in railway_url:
