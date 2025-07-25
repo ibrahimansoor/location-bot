@@ -2090,13 +2090,22 @@ def api_search_stores_enhanced():
         category = data.get('category')
         user_id = data['user_id']
         
-        # Get weather data
-        weather_data = None
-        if WEATHER_API_KEY:
-            weather_data = asyncio.run(get_weather_data(lat, lng))
+        safe_print(f"🔍 Search request: lat={lat}, lng={lng}, radius={radius}, user={user_id}")
+        
+        # Check if Google Maps is available
+        if not gmaps:
+            safe_print("❌ Google Maps API not available")
+            return jsonify({
+                "error": "Google Maps API not available",
+                "status": "error",
+                "stores": [],
+                "total_found": 0
+            }), 503
         
         # Search for stores
         stores = search_nearby_stores_enhanced(lat, lng, radius * 1609.34, category)  # Convert miles to meters
+        
+        safe_print(f"🔍 Search completed: found {len(stores)} stores")
         
         # Group stores by category
         categorized_stores = defaultdict(list)
@@ -2108,14 +2117,13 @@ def api_search_stores_enhanced():
         # Log analytics
         log_analytics(
             user_id,
-            "enhanced_store_search",
+            "simplified_store_search",
             {
                 "location": {"lat": lat, "lng": lng},
                 "radius": radius,
                 "category": category,
                 "results_count": len(stores),
-                "categories_found": list(categorized_stores.keys()),
-                "has_weather": weather_data is not None
+                "categories_found": list(categorized_stores.keys())
             },
             request_obj=request
         )
@@ -2124,7 +2132,6 @@ def api_search_stores_enhanced():
             "status": "success",
             "stores": stores,
             "categorized_stores": dict(categorized_stores),
-            "weather": weather_data,
             "search_location": {"lat": lat, "lng": lng, "radius": radius},
             "total_found": len(stores),
             "categories": list(categorized_stores.keys()),
@@ -2133,6 +2140,7 @@ def api_search_stores_enhanced():
         
     except Exception as e:
         error_id = handle_error(e, "Enhanced store search API")
+        safe_print(f"❌ Search API error: {e}")
         return jsonify({"error": f"Internal server error (ID: {error_id})"}), 500
 
 
@@ -2143,42 +2151,62 @@ def simplified_location_webhook():
     """Simplified location webhook for store check-ins"""
     try:
         data = request.get_json()
-        if not data or not bot_connected or not bot_ready:
+        safe_print(f"📨 Webhook received: {data}")
+        
+        if not data:
+            safe_print("❌ No data in webhook request")
+            return jsonify({"error": "No data provided"}), 400
+        
+        if not bot_connected or not bot_ready:
+            safe_print(f"❌ Bot not ready: connected={bot_connected}, ready={bot_ready}")
             return jsonify({"error": "Bot not ready"}), 503
         
         lat = float(data['latitude'])
         lng = float(data['longitude'])
         user_id = data['user_id']
         
+        safe_print(f"📍 Location data: lat={lat}, lng={lng}, user={user_id}")
+        
         # Get store data
         selected_store_data = data.get('selectedStore')
         session_id = data.get('session_id')
         
+        if not selected_store_data:
+            safe_print("❌ No selected store data")
+            return jsonify({"error": "No store selected"}), 400
+        
+        safe_print(f"🏪 Store selected: {selected_store_data.get('name', 'Unknown')}")
+        
         # Save to database with minimal data
         if user_id and selected_store_data:
-            with db_pool.get_connection() as conn:
-                conn.execute('''
-                    INSERT INTO user_locations 
-                    (user_id, channel_id, guild_id, lat, lng, accuracy, store_name, store_address, 
-                     store_place_id, store_category, distance, session_id, is_real_time)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    str(user_id),
-                    str(LOCATION_CHANNEL_ID),
-                    data.get('guild_id'),
-                    lat, lng,
-                    data.get('accuracy'),
-                    selected_store_data['name'],
-                    selected_store_data['address'],
-                    selected_store_data.get('place_id'),
-                    selected_store_data.get('category'),
-                    selected_store_data['distance'],
-                    session_id,
-                    data.get('isRealTime', True)
-                ))
+            try:
+                with db_pool.get_connection() as conn:
+                    conn.execute('''
+                        INSERT INTO user_locations 
+                        (user_id, channel_id, guild_id, lat, lng, accuracy, store_name, store_address, 
+                         store_place_id, store_category, distance, session_id, is_real_time)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        str(user_id),
+                        str(LOCATION_CHANNEL_ID),
+                        data.get('guild_id'),
+                        lat, lng,
+                        data.get('accuracy'),
+                        selected_store_data['name'],
+                        selected_store_data['address'],
+                        selected_store_data.get('place_id'),
+                        selected_store_data.get('category'),
+                        selected_store_data['distance'],
+                        session_id,
+                        data.get('isRealTime', True)
+                    ))
+                safe_print("✅ Location saved to database")
+            except Exception as db_error:
+                safe_print(f"⚠️ Database error: {db_error}")
         
         # Post to Discord
         if bot.loop and not bot.loop.is_closed():
+            safe_print("🤖 Posting to Discord...")
             future = asyncio.run_coroutine_threadsafe(
                 post_enhanced_location_to_discord(data), 
                 bot.loop
@@ -2186,6 +2214,7 @@ def simplified_location_webhook():
             
             result = future.result(timeout=20)
             if result:
+                safe_print("✅ Successfully posted to Discord")
                 log_analytics(
                     user_id,
                     "simplified_location_shared",
@@ -2200,12 +2229,15 @@ def simplified_location_webhook():
                 
                 return jsonify({"status": "success"}), 200
             else:
+                safe_print("❌ Failed to post to Discord")
                 return jsonify({"error": "Failed to post to Discord"}), 500
         else:
+            safe_print(f"❌ Bot loop not available: loop={bot.loop}, closed={bot.loop.is_closed() if bot.loop else 'No loop'}")
             return jsonify({"error": "Bot loop not available"}), 503
         
     except Exception as e:
         error_id = handle_error(e, "Simplified location webhook")
+        safe_print(f"❌ Webhook error: {e}")
         return jsonify({"error": f"Internal server error (ID: {error_id})"}), 500
 
 async def post_enhanced_location_to_discord(location_data):
@@ -2456,6 +2488,26 @@ def main():
         run_enhanced_flask()
     except Exception as e:
         handle_error(e, "Critical server error")
+
+@app.route('/test', methods=['GET'])
+def test_endpoint():
+    """Simple test endpoint to check bot status"""
+    try:
+        status = {
+            "bot_connected": bot_connected,
+            "bot_ready": bot_ready,
+            "google_maps_available": gmaps is not None,
+            "location_channel_id": LOCATION_CHANNEL_ID,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        safe_print(f"🧪 Test endpoint called: {status}")
+        
+        return jsonify(status), 200
+        
+    except Exception as e:
+        error_id = handle_error(e, "Test endpoint")
+        return jsonify({"error": f"Test failed (ID: {error_id})"}), 500
 
 if __name__ == "__main__":
     main()
