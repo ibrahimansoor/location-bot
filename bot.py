@@ -361,7 +361,7 @@ def get_comprehensive_store_database():
     """Focused store database - only Target, Walmart, BJ's, and Costco for fast check-ins"""
     return [
         # Primary stores (Priority 1) - Exactly what you want
-        StoreConfig("Target", "Target", "🎯", "Department", 1, ["Target", "Target Store"]),
+        StoreConfig("Target", "Target", "🎯", "Department", 1, ["Target", "Target Store", "Target Corporation", "Target Superstore", "department store"]),
         StoreConfig("Walmart", "Walmart", "🏪", "Superstore", 1, ["Walmart", "Walmart Supercenter"]),
         StoreConfig("BJ's Wholesale Club", "BJs", "🛒", "Wholesale", 1, ["BJ's", "BJs"]),
         StoreConfig("Costco", "Costco", "🏬", "Wholesale", 1, ["Costco"]),
@@ -407,8 +407,8 @@ def initialize_google_maps():
 
 
 
-def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 8000, 
-                                 category: str = None, max_stores_per_type: int = 2) -> List[Dict]:
+def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 12000, 
+                                 category: str = None, max_stores_per_type: int = 3) -> List[Dict]:
     """Enhanced store search with comprehensive coverage and caching"""
     
     # Check cache first
@@ -2043,7 +2043,7 @@ def enhanced_index():
         async function searchNearbyStores(lat, lng) {{
             showStatus('🔍 Searching for nearby stores...', 'info');
             try {{
-                const requestData = {{ latitude: lat, longitude: lng, radius: 5, user_id: USER_INFO?.user_id }};
+                const requestData = {{ latitude: lat, longitude: lng, radius: 10, user_id: USER_INFO?.user_id }};
                 console.log('Searching stores with data:', requestData);
                 const response = await fetch('/api/search-stores', {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }}, body: JSON.stringify(requestData) }});
                 if (!response.ok) throw new Error(`Search failed: ${{response.status}}`);
@@ -2209,7 +2209,7 @@ def api_search_stores_enhanced():
         
         lat = float(data['latitude'])
         lng = float(data['longitude'])
-        radius = data.get('radius', 5)  # Reduced default radius for faster searches
+        radius = data.get('radius', 10)  # Increased radius to find more stores
         category = data.get('category')
         user_id = data['user_id']
         
