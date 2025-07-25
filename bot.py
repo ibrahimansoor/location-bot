@@ -1060,14 +1060,23 @@ async def location_command(interaction: discord.Interaction):
             'session_id': session_id
         }
         
+        # Get Railway URL from environment or use a fallback
+        railway_url = os.getenv('RAILWAY_URL')
+        if not railway_url:
+            # Try to get from Railway's environment
+            railway_url = os.getenv('RAILWAY_STATIC_URL') or os.getenv('PORT') or 'https://location-bot-production.up.railway.app'
+            if railway_url and not railway_url.startswith('http'):
+                railway_url = f"https://location-bot-production.up.railway.app"
+        
+        safe_print(f"🔗 Using Railway URL: {railway_url}")
+        
+        website_url = f"{railway_url}?session={session_id}&user={interaction.user.id}&channel={interaction.channel.id}"
+        
         embed = discord.Embed(
             title="📍 Location Sharing",
             description=f"**{interaction.user.display_name}** wants to share their location",
             color=0x5865F2
         )
-        
-        railway_url = os.getenv('RAILWAY_URL', 'https://web-production-f0220.up.railway.app')
-        website_url = f"{railway_url}?session={session_id}&user={interaction.user.id}&channel={interaction.channel.id}"
         
         embed.add_field(
             name="🔗 Location Portal",
@@ -1091,6 +1100,7 @@ async def location_command(interaction: discord.Interaction):
             "location_session_created",
             {
                 "session_id": session_id,
+                "railway_url": railway_url,
                 "simplified": True
             },
             guild_id=interaction.guild.id if interaction.guild else None,
@@ -2440,8 +2450,8 @@ def run_enhanced_flask():
         handle_error(e, "Flask startup")
 
 def main():
-    """Enhanced main function"""
-    safe_print("=== Starting Enhanced Location Bot ===")
+    """Simplified main function for Railway deployment"""
+    safe_print("=== Starting Simplified Location Bot ===")
     
     # Environment validation
     TOKEN = os.getenv('DISCORD_TOKEN')
@@ -2451,14 +2461,19 @@ def main():
     
     GOOGLE_API_KEY = os.getenv('GOOGLE_MAPS_API_KEY')
     if not GOOGLE_API_KEY:
-        safe_print("⚠️ GOOGLE_MAPS_API_KEY not found - real-time search disabled")
+        safe_print("⚠️ GOOGLE_MAPS_API_KEY not found - store search will be limited")
     else:
         safe_print("✅ Google Maps API key found")
     
-
+    # Check Railway environment
+    railway_url = os.getenv('RAILWAY_URL')
+    if railway_url:
+        safe_print(f"✅ Railway URL: {railway_url}")
+    else:
+        safe_print("⚠️ RAILWAY_URL not set - using fallback URL")
     
     def start_bot():
-        safe_print("🤖 Starting enhanced Discord bot...")
+        safe_print("🤖 Starting simplified Discord bot...")
         try:
             bot.run(TOKEN, log_handler=None)  # Use our custom logging
         except Exception as e:
@@ -2468,19 +2483,19 @@ def main():
     bot_thread = threading.Thread(target=start_bot, daemon=True)
     bot_thread.start()
     
-    # Wait for bot to connect
+    # Wait for bot to connect (shorter timeout for Railway)
     safe_print("⏰ Waiting for Discord bot to connect...")
-    max_wait = 90
+    max_wait = 60  # Reduced from 90 to 60 seconds
     waited = 0
     while not bot_connected and waited < max_wait:
         time.sleep(1)
         waited += 1
-        if waited % 15 == 0:
+        if waited % 10 == 0:  # Log every 10 seconds instead of 15
             safe_print(f"⏰ Still waiting... ({waited}s)")
     
     if bot_connected:
         safe_print("✅ Discord bot connected!")
-        time.sleep(5)  # Allow time for full initialization
+        time.sleep(3)  # Reduced from 5 to 3 seconds
     else:
         safe_print("⚠️ Bot not ready yet, but starting Flask anyway...")
     
@@ -2508,6 +2523,33 @@ def test_endpoint():
     except Exception as e:
         error_id = handle_error(e, "Test endpoint")
         return jsonify({"error": f"Test failed (ID: {error_id})"}), 500
+
+@app.route('/debug', methods=['GET'])
+def debug_endpoint():
+    """Debug endpoint to show Railway URL and environment"""
+    try:
+        railway_url = os.getenv('RAILWAY_URL')
+        railway_static_url = os.getenv('RAILWAY_STATIC_URL')
+        port = os.getenv('PORT')
+        
+        debug_info = {
+            "railway_url": railway_url,
+            "railway_static_url": railway_static_url,
+            "port": port,
+            "bot_connected": bot_connected,
+            "bot_ready": bot_ready,
+            "google_maps_available": gmaps is not None,
+            "location_channel_id": LOCATION_CHANNEL_ID,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        safe_print(f"🐛 Debug endpoint called: {debug_info}")
+        
+        return jsonify(debug_info), 200
+        
+    except Exception as e:
+        error_id = handle_error(e, "Debug endpoint")
+        return jsonify({"error": f"Debug failed (ID: {error_id})"}), 500
 
 if __name__ == "__main__":
     main()
