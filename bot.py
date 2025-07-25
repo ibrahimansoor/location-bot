@@ -2060,6 +2060,7 @@ def enhanced_index():
                 
                 const data = await response.json();
                 console.log('Store search response:', data);
+                console.log('Number of stores found:', data.stores ? data.stores.length : 0);
                 nearbyStores = data.stores || [];
                 showStatus(`✅ Found ${{nearbyStores.length}} stores nearby`, 'success');
                 displayStoresList();
@@ -2072,9 +2073,16 @@ def enhanced_index():
         
         function displayStoresList() {{
             const storesContainer = document.getElementById('nearbyStores');
-            if (!storesContainer) return;
+            console.log('Displaying stores list. Container found:', !!storesContainer);
+            console.log('Number of stores to display:', nearbyStores.length);
+            
+            if (!storesContainer) {{
+                console.error('Stores container not found!');
+                return;
+            }}
             
             if (nearbyStores.length === 0) {{
+                console.log('No stores found, showing empty message');
                 storesContainer.innerHTML = '<div style="text-align: center; padding: 40px; opacity: 0.6;"><div style="font-size: 48px; margin-bottom: 16px;">🔍</div><p>No stores found nearby.</p></div>';
                 storesContainer.style.display = 'block';
                 return;
