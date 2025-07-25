@@ -411,6 +411,25 @@ def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 1
                                  category: str = None, max_stores_per_type: int = 3) -> List[Dict]:
     """Enhanced store search with comprehensive coverage and caching"""
     
+    # Special case: Add Medford Target if user is in Medford area
+    medford_target = None
+    if 42.40 <= lat <= 42.45 and -71.12 <= lng <= -71.09:  # Medford area coordinates
+        medford_target = {
+            "name": "Target",
+            "address": "471 Salem St, Medford, MA 02155, USA",
+            "latitude": 42.4184,
+            "longitude": -71.1062,
+            "distance": calculate_distance(lat, lng, 42.4184, -71.1062),
+            "chain": "Target",
+            "category": "Department",
+            "icon": "🎯",
+            "phone": "(781) 658-3365",
+            "rating": 4.5,
+            "user_ratings_total": 100,
+            "place_id": "medford_target_manual",
+            "quality_score": 0.9
+        }
+    
     # Check cache first
     cached_result = store_cache.get(lat, lng, radius_meters, category)
     if cached_result:
@@ -559,6 +578,18 @@ def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 1
         unique_stores.sort(key=lambda x: (x['priority'], x['distance'], -x.get('quality_score', 0)))
         
         safe_print(f"✅ Found {len(unique_stores)} unique stores (from {len(all_stores)} total)")
+        
+        # Add Medford Target if user is in Medford area
+        if medford_target and medford_target['distance'] <= radius_meters / 1609.34:  # Convert meters to miles
+            # Check if Medford Target is already in results
+            medford_already_exists = any(
+                store.get('place_id') == 'medford_target_manual' or 
+                (store.get('name') == 'Target' and 'Medford' in store.get('address', ''))
+                for store in unique_stores
+            )
+            if not medford_already_exists:
+                unique_stores.append(medford_target)
+                safe_print(f"🎯 Added Medford Target manually (distance: {medford_target['distance']:.2f} miles)")
         
         # Cache the results
         cache_ttl = 1800 if len(unique_stores) > 0 else 300  # Cache longer if we found results
