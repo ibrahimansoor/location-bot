@@ -1792,7 +1792,7 @@ def enhanced_index():
             margin-top: 30px; 
             text-align: left; 
             display: none; 
-            max-height: 500px; 
+            max-height: 800px; 
             overflow-y: auto;
         }}
         
@@ -2117,10 +2117,16 @@ def enhanced_index():
             }}
             
             const storesByCategory = groupStoresByCategory(nearbyStores);
+            console.log('Categories found:', Object.keys(storesByCategory));
+            console.log('Total stores:', nearbyStores.length);
+            
             let storesHTML = '';
+            let categoryCount = 0;
             
             Object.entries(storesByCategory).forEach(([category, stores]) => {{
                 if (stores.length === 0) return;
+                categoryCount++;
+                console.log(`Displaying category: ${{category}} with ${{stores.length}} stores`);
                 storesHTML += `
                     <div class="store-category">
                         <div class="category-header">${{getCategoryIcon(category)}} ${{category}} (${{stores.length}})</div>
@@ -2129,6 +2135,7 @@ def enhanced_index():
                 `;
             }});
             
+            console.log(`Total categories displayed: ${{categoryCount}}`);
             storesContainer.innerHTML = storesHTML;
             storesContainer.style.display = 'block';
         }}
