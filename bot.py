@@ -1042,8 +1042,11 @@ async def location_command(interaction: discord.Interaction):
     global LOCATION_CHANNEL_ID, LOCATION_USER_INFO
     
     try:
+        # Respond immediately to prevent timeout
+        await interaction.response.defer(thinking=True)
+        
         if not check_user_permissions(interaction.user.id, 'user'):
-            await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
+            await interaction.followup.send("❌ You don't have permission to use this command.", ephemeral=True)
             return
         
         LOCATION_CHANNEL_ID = interaction.channel.id
@@ -1100,7 +1103,7 @@ async def location_command(interaction: discord.Interaction):
         embed.set_footer(text="Location Bot • Simple store check-ins")
         embed.timestamp = discord.utils.utcnow()
         
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
         
         log_analytics(
             interaction.user.id,
@@ -1116,7 +1119,14 @@ async def location_command(interaction: discord.Interaction):
         
     except Exception as e:
         error_id = handle_error(e, "Location command")
-        await interaction.response.send_message(f"❌ Error creating location session (ID: {error_id})")
+        try:
+            await interaction.followup.send(f"❌ Error creating location session (ID: {error_id})", ephemeral=True)
+        except:
+            # If followup fails, try to send a new message
+            try:
+                await interaction.channel.send(f"❌ Error creating location session (ID: {error_id})")
+            except:
+                pass
 
 @bot.tree.command(name="search", description="Search for specific store types near you")
 async def search_command(interaction: discord.Interaction, 
@@ -1124,12 +1134,15 @@ async def search_command(interaction: discord.Interaction,
                         radius: int = 10):
     """Enhanced store search command"""
     try:
+        # Respond immediately to prevent timeout
+        await interaction.response.defer(thinking=True)
+        
         if not check_user_permissions(interaction.user.id, 'user'):
-            await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
+            await interaction.followup.send("❌ You don't have permission to use this command.", ephemeral=True)
             return
         
         if radius < 1 or radius > 50:
-            await interaction.response.send_message("❌ Radius must be between 1 and 50 miles.", ephemeral=True)
+            await interaction.followup.send("❌ Radius must be between 1 and 50 miles.", ephemeral=True)
             return
         
         categories = list(set(store.category for store in get_comprehensive_store_database()))
@@ -1144,7 +1157,7 @@ async def search_command(interaction: discord.Interaction,
             category_list = ", ".join(f"`{cat}`" for cat in sorted(categories))
             embed.add_field(name="Categories", value=category_list, inline=False)
             
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=embed, ephemeral=True)
             return
         
         embed = discord.Embed(
@@ -1190,11 +1203,18 @@ async def search_command(interaction: discord.Interaction,
         
         embed.set_footer(text="Enhanced Store Search • Real-time Google Places Data")
         
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
         
     except Exception as e:
         error_id = handle_error(e, "Search command")
-        await interaction.response.send_message(f"❌ Error with search command (ID: {error_id})")
+        try:
+            await interaction.followup.send(f"❌ Error with search command (ID: {error_id})", ephemeral=True)
+        except:
+            # If followup fails, try to send a new message
+            try:
+                await interaction.channel.send(f"❌ Error with search command (ID: {error_id})")
+            except:
+                pass
 
 @bot.tree.command(name="favorites", description="Manage your favorite locations")
 async def favorites_command(interaction: discord.Interaction, 
