@@ -1068,6 +1068,13 @@ async def location_command(interaction: discord.Interaction):
             if railway_url and not railway_url.startswith('http'):
                 railway_url = f"https://location-bot-production.up.railway.app"
         
+        # If still no URL, try to construct from Railway's environment
+        if not railway_url or 'your-app' in railway_url:
+            # Try to get the actual Railway URL from environment
+            railway_project_name = os.getenv('RAILWAY_PROJECT_NAME', 'location-bot')
+            railway_service_name = os.getenv('RAILWAY_SERVICE_NAME', 'web')
+            railway_url = f"https://{railway_project_name}-{railway_service_name}.up.railway.app"
+        
         safe_print(f"🔗 Using Railway URL: {railway_url}")
         
         website_url = f"{railway_url}?session={session_id}&user={interaction.user.id}&channel={interaction.channel.id}"
@@ -1153,6 +1160,13 @@ async def search_command(interaction: discord.Interaction,
             railway_url = os.getenv('RAILWAY_STATIC_URL') or os.getenv('PORT') or 'https://location-bot-production.up.railway.app'
             if railway_url and not railway_url.startswith('http'):
                 railway_url = f"https://location-bot-production.up.railway.app"
+        
+        # If still no URL, try to construct from Railway's environment
+        if not railway_url or 'your-app' in railway_url:
+            # Try to get the actual Railway URL from environment
+            railway_project_name = os.getenv('RAILWAY_PROJECT_NAME', 'location-bot')
+            railway_service_name = os.getenv('RAILWAY_SERVICE_NAME', 'web')
+            railway_url = f"https://{railway_project_name}-{railway_service_name}.up.railway.app"
         
         search_url = f"{railway_url}?user={interaction.user.id}&channel={interaction.channel.id}&category={category or ''}&radius={radius}"
         
@@ -1430,6 +1444,13 @@ async def url_command(interaction: discord.Interaction):
             railway_url = os.getenv('RAILWAY_STATIC_URL') or os.getenv('PORT') or 'https://location-bot-production.up.railway.app'
             if railway_url and not railway_url.startswith('http'):
                 railway_url = f"https://location-bot-production.up.railway.app"
+        
+        # If still no URL, try to construct from Railway's environment
+        if not railway_url or 'your-app' in railway_url:
+            # Try to get the actual Railway URL from environment
+            railway_project_name = os.getenv('RAILWAY_PROJECT_NAME', 'location-bot')
+            railway_service_name = os.getenv('RAILWAY_SERVICE_NAME', 'web')
+            railway_url = f"https://{railway_project_name}-{railway_service_name}.up.railway.app"
         
         embed = discord.Embed(
             title="🔗 Railway URL Info",
@@ -2577,6 +2598,13 @@ def debug_endpoint():
         railway_url = os.getenv('RAILWAY_URL')
         railway_static_url = os.getenv('RAILWAY_STATIC_URL')
         port = os.getenv('PORT')
+        
+        # If still no URL, try to construct from Railway's environment
+        if not railway_url or 'your-app' in railway_url:
+            # Try to get the actual Railway URL from environment
+            railway_project_name = os.getenv('RAILWAY_PROJECT_NAME', 'location-bot')
+            railway_service_name = os.getenv('RAILWAY_SERVICE_NAME', 'web')
+            railway_url = f"https://{railway_project_name}-{railway_service_name}.up.railway.app"
         
         debug_info = {
             "railway_url": railway_url,
