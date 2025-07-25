@@ -358,71 +358,27 @@ class StoreConfig:
     search_terms: List[str] = None
 
 def get_comprehensive_store_database():
-    """Enhanced store database with detailed configurations"""
+    """Streamlined store database - only essential stores for fast check-ins"""
     return [
-        # Department Stores (Priority 1)
+        # Major Retail Stores (Priority 1) - Fast check-ins
         StoreConfig("Target", "Target", "🎯", "Department", 1, ["Target", "Target Store"]),
         StoreConfig("Walmart", "Walmart", "🏪", "Superstore", 1, ["Walmart", "Walmart Supercenter"]),
-        StoreConfig("Macy's", "Macys", "👗", "Department", 2, ["Macy's", "Macys"]),
-        StoreConfig("Nordstrom", "Nordstrom", "👔", "Department", 2, ["Nordstrom"]),
-        StoreConfig("Kohl's", "Kohls", "🛍️", "Department", 2, ["Kohl's", "Kohls"]),
-        
-        # Electronics (Priority 1-2)
         StoreConfig("Best Buy", "Best Buy", "🔌", "Electronics", 1, ["Best Buy"]),
-        StoreConfig("Apple Store", "Apple", "📱", "Electronics", 2, ["Apple Store", "Apple"]),
-        StoreConfig("GameStop", "GameStop", "🎮", "Electronics", 3, ["GameStop"]),
-        StoreConfig("Micro Center", "Micro Center", "💻", "Electronics", 2, ["Micro Center"]),
-        
-        # Wholesale/Warehouse (Priority 1-2)
         StoreConfig("BJ's Wholesale Club", "BJs", "🛒", "Wholesale", 1, ["BJ's", "BJs"]),
         StoreConfig("Costco", "Costco", "🏬", "Wholesale", 1, ["Costco"]),
-        StoreConfig("Sam's Club", "Sams Club", "🛍️", "Wholesale", 2, ["Sam's Club", "Sams"]),
         
-        # Hardware/Home Improvement (Priority 1-2)
+        # Hardware Stores (Priority 1) - Common check-ins
         StoreConfig("Home Depot", "Home Depot", "🔨", "Hardware", 1, ["Home Depot", "The Home Depot"]),
         StoreConfig("Lowe's", "Lowes", "🏠", "Hardware", 1, ["Lowe's", "Lowes"]),
-        StoreConfig("Menards", "Menards", "🔧", "Hardware", 2, ["Menards"]),
-        StoreConfig("Harbor Freight", "Harbor Freight", "⚒️", "Hardware", 3, ["Harbor Freight"]),
         
-        # Pharmacies (Priority 1-2)
-        StoreConfig("CVS Pharmacy", "CVS", "💊", "Pharmacy", 1, ["CVS", "CVS Pharmacy"]),
-        StoreConfig("Walgreens", "Walgreens", "⚕️", "Pharmacy", 1, ["Walgreens"]),
-        StoreConfig("Rite Aid", "Rite Aid", "🏥", "Pharmacy", 2, ["Rite Aid"]),
+        # Major Department Stores (Priority 2) - Secondary options
+        StoreConfig("Macy's", "Macys", "👗", "Department", 2, ["Macy's", "Macys"]),
+        StoreConfig("Kohl's", "Kohls", "🛍️", "Department", 2, ["Kohl's", "Kohls"]),
+        StoreConfig("Sam's Club", "Sams Club", "🛍️", "Wholesale", 2, ["Sam's Club", "Sams"]),
         
-        # Grocery (Priority 1-3)
-        StoreConfig("Stop & Shop", "Stop & Shop", "🛒", "Grocery", 1, ["Stop & Shop", "Stop and Shop"]),
-        StoreConfig("Market Basket", "Market Basket", "🥬", "Grocery", 1, ["Market Basket"]),
-        StoreConfig("Whole Foods", "Whole Foods", "🥗", "Grocery", 2, ["Whole Foods", "Whole Foods Market"]),
-        StoreConfig("Trader Joe's", "Trader Joes", "🌽", "Grocery", 2, ["Trader Joe's", "Trader Joes"]),
-        StoreConfig("Shaw's", "Shaws", "🥕", "Grocery", 2, ["Shaw's", "Shaws"]),
-        StoreConfig("Big Y", "Big Y", "🍎", "Grocery", 3, ["Big Y"]),
-        
-        # Coffee & Fast Food (Priority 1-3)
-        StoreConfig("Starbucks", "Starbucks", "☕", "Coffee", 1, ["Starbucks"]),
-        StoreConfig("Dunkin'", "Dunkin", "🍩", "Coffee", 1, ["Dunkin'", "Dunkin Donuts"]),
-        StoreConfig("McDonald's", "McDonalds", "🍟", "Fast Food", 1, ["McDonald's", "McDonalds"]),
-        StoreConfig("Subway", "Subway", "🥪", "Fast Food", 2, ["Subway"]),
-        StoreConfig("Burger King", "Burger King", "🍔", "Fast Food", 2, ["Burger King"]),
-        StoreConfig("Taco Bell", "Taco Bell", "🌮", "Fast Food", 3, ["Taco Bell"]),
-        
-        # Gas Stations (Priority 1-3)
-        StoreConfig("Shell", "Shell", "⛽", "Gas", 1, ["Shell", "Shell Gas"]),
-        StoreConfig("Mobil", "Mobil", "⛽", "Gas", 1, ["Mobil", "Exxon Mobil"]),
-        StoreConfig("Gulf", "Gulf", "⛽", "Gas", 2, ["Gulf"]),
-        StoreConfig("Citgo", "Citgo", "⛽", "Gas", 2, ["Citgo"]),
-        StoreConfig("Cumberland Farms", "Cumberland", "⛽", "Gas", 2, ["Cumberland Farms", "Cumbys"]),
-        
-        # Banking (Priority 1-3)
-        StoreConfig("Bank of America", "BofA", "🏦", "Banking", 1, ["Bank of America", "BofA"]),
-        StoreConfig("TD Bank", "TD Bank", "🏦", "Banking", 1, ["TD Bank"]),
-        StoreConfig("Citizens Bank", "Citizens", "🏦", "Banking", 2, ["Citizens Bank"]),
-        StoreConfig("Wells Fargo", "Wells Fargo", "🏦", "Banking", 2, ["Wells Fargo"]),
-        StoreConfig("Chase Bank", "Chase", "🏦", "Banking", 1, ["Chase", "JPMorgan Chase"]),
-        
-        # Auto/Service (Priority 2-3)
-        StoreConfig("AutoZone", "AutoZone", "🔧", "Auto", 2, ["AutoZone"]),
-        StoreConfig("Jiffy Lube", "Jiffy Lube", "🛠️", "Auto", 3, ["Jiffy Lube"]),
-        StoreConfig("Valvoline", "Valvoline", "🛢️", "Auto", 3, ["Valvoline Instant Oil"]),
+        # Electronics (Priority 2) - Tech stores
+        StoreConfig("Apple Store", "Apple", "📱", "Electronics", 2, ["Apple Store", "Apple"]),
+        StoreConfig("Micro Center", "Micro Center", "💻", "Electronics", 2, ["Micro Center"]),
     ]
 
 def initialize_google_maps():
@@ -465,8 +421,8 @@ def initialize_google_maps():
 
 
 
-def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 16000, 
-                                 category: str = None, max_stores_per_type: int = 4) -> List[Dict]:
+def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 8000, 
+                                 category: str = None, max_stores_per_type: int = 2) -> List[Dict]:
     """Enhanced store search with comprehensive coverage and caching"""
     
     # Check cache first
@@ -601,16 +557,16 @@ def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 1
                     if processed_count > 0:
                         safe_print(f"    ✅ Processed {processed_count} {store_config.chain} locations")
                     
-                    # Rate limiting between store types
-                    time.sleep(0.1)
+                    # Rate limiting between store types (reduced for speed)
+                    time.sleep(0.05)
                     
                 except Exception as store_error:
                     handle_error(store_error, f"Searching {store_config.chain}")
                     continue
             
-            # Longer pause between priority groups
+            # Shorter pause between priority groups (optimized for speed)
             if priority < max(priority_groups.keys()):
-                time.sleep(0.2)
+                time.sleep(0.1)
         
         # Remove duplicates and sort
         unique_stores = remove_duplicate_stores(all_stores)
@@ -2091,7 +2047,7 @@ def enhanced_index():
         async function searchNearbyStores(lat, lng) {{
             showStatus('🔍 Searching for nearby stores...', 'info');
             try {{
-                const requestData = {{ latitude: lat, longitude: lng, radius: 10, user_id: USER_INFO?.user_id }};
+                const requestData = {{ latitude: lat, longitude: lng, radius: 5, user_id: USER_INFO?.user_id }};
                 const response = await fetch('/api/search-stores', {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }}, body: JSON.stringify(requestData) }});
                 if (!response.ok) throw new Error(`Search failed: ${{response.status}}`);
                 
@@ -2228,7 +2184,7 @@ def api_search_stores_enhanced():
         
         lat = float(data['latitude'])
         lng = float(data['longitude'])
-        radius = data.get('radius', 10)
+        radius = data.get('radius', 5)  # Reduced default radius for faster searches
         category = data.get('category')
         user_id = data['user_id']
         
