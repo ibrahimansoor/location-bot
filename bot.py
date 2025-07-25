@@ -1057,13 +1057,13 @@ async def location_command(interaction: discord.Interaction):
         # Get Railway URL
         railway_url = os.getenv('RAILWAY_URL')
         if not railway_url:
-            railway_url = os.getenv('RAILWAY_STATIC_URL') or os.getenv('PORT') or 'https://location-bot-production.up.railway.app'
+            railway_url = os.getenv('RAILWAY_STATIC_URL') or os.getenv('PORT') or 'https://terrific-trust-web.up.railway.app'
             if railway_url and not railway_url.startswith('http'):
-                railway_url = f"https://location-bot-production.up.railway.app"
+                railway_url = f"https://terrific-trust-web.up.railway.app"
         
         # If still no URL, try to construct from Railway's environment
         if not railway_url or 'your-app' in railway_url:
-            railway_project_name = os.getenv('RAILWAY_PROJECT_NAME', 'location-bot')
+            railway_project_name = os.getenv('RAILWAY_PROJECT_NAME', 'terrific-trust')
             railway_service_name = os.getenv('RAILWAY_SERVICE_NAME', 'web')
             railway_url = f"https://{railway_project_name}-{railway_service_name}.up.railway.app"
         
@@ -1169,13 +1169,13 @@ async def search_command(interaction: discord.Interaction,
         # Get Railway URL
         railway_url = os.getenv('RAILWAY_URL')
         if not railway_url:
-            railway_url = os.getenv('RAILWAY_STATIC_URL') or os.getenv('PORT') or 'https://location-bot-production.up.railway.app'
+            railway_url = os.getenv('RAILWAY_STATIC_URL') or os.getenv('PORT') or 'https://terrific-trust-web.up.railway.app'
             if railway_url and not railway_url.startswith('http'):
-                railway_url = f"https://location-bot-production.up.railway.app"
+                railway_url = f"https://terrific-trust-web.up.railway.app"
         
         # If still no URL, try to construct from Railway's environment
         if not railway_url or 'your-app' in railway_url:
-            railway_project_name = os.getenv('RAILWAY_PROJECT_NAME', 'location-bot')
+            railway_project_name = os.getenv('RAILWAY_PROJECT_NAME', 'terrific-trust')
             railway_service_name = os.getenv('RAILWAY_SERVICE_NAME', 'web')
             railway_url = f"https://{railway_project_name}-{railway_service_name}.up.railway.app"
         
@@ -1495,14 +1495,14 @@ async def url_command(interaction: discord.Interaction):
         railway_url = os.getenv('RAILWAY_URL')
         if not railway_url:
             # Try to get from Railway's environment
-            railway_url = os.getenv('RAILWAY_STATIC_URL') or os.getenv('PORT') or 'https://location-bot-production.up.railway.app'
+            railway_url = os.getenv('RAILWAY_STATIC_URL') or os.getenv('PORT') or 'https://terrific-trust-web.up.railway.app'
             if railway_url and not railway_url.startswith('http'):
-                railway_url = f"https://location-bot-production.up.railway.app"
+                railway_url = f"https://terrific-trust-web.up.railway.app"
         
         # If still no URL, try to construct from Railway's environment
         if not railway_url or 'your-app' in railway_url:
             # Try to get the actual Railway URL from environment
-            railway_project_name = os.getenv('RAILWAY_PROJECT_NAME', 'location-bot')
+            railway_project_name = os.getenv('RAILWAY_PROJECT_NAME', 'terrific-trust')
             railway_service_name = os.getenv('RAILWAY_SERVICE_NAME', 'web')
             railway_url = f"https://{railway_project_name}-{railway_service_name}.up.railway.app"
         
@@ -2591,7 +2591,7 @@ def main():
     if railway_url:
         safe_print(f"✅ Railway URL: {railway_url}")
     else:
-        safe_print("⚠️ RAILWAY_URL not set - using fallback URL")
+        safe_print("⚠️ RAILWAY_URL not set - using fallback URL: https://terrific-trust-web.up.railway.app")
     
     def start_bot():
         safe_print("🤖 Starting simplified Discord bot...")
@@ -2656,7 +2656,7 @@ def debug_endpoint():
         # If still no URL, try to construct from Railway's environment
         if not railway_url or 'your-app' in railway_url:
             # Try to get the actual Railway URL from environment
-            railway_project_name = os.getenv('RAILWAY_PROJECT_NAME', 'location-bot')
+            railway_project_name = os.getenv('RAILWAY_PROJECT_NAME', 'terrific-trust')
             railway_service_name = os.getenv('RAILWAY_SERVICE_NAME', 'web')
             railway_url = f"https://{railway_project_name}-{railway_service_name}.up.railway.app"
         
