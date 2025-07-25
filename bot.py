@@ -1970,15 +1970,44 @@ def enhanced_index():
         
         function loadGoogleMapsAPI() {{
             if (typeof google !== 'undefined') {{ initializeMap(); return; }}
-            if (!GOOGLE_API_KEY) {{ showStatus('❌ Google Maps API key not configured', 'error'); return; }}
+            if (!GOOGLE_API_KEY) {{ 
+                showStatus('❌ Google Maps API key not configured - using fallback mode', 'warning'); 
+                initializeFallbackMode();
+                return; 
+            }}
             const script = document.createElement('script');
             script.src = `https://maps.googleapis.com/maps/api/js?key=${{GOOGLE_API_KEY}}&libraries=marker,places&callback=initializeMap`;
-            script.onerror = () => showStatus('❌ Failed to load Google Maps API', 'error');
+            script.onerror = () => {{
+                showStatus('⚠️ Google Maps failed to load - using fallback mode', 'warning');
+                initializeFallbackMode();
+            }};
+            script.onload = () => {{
+                console.log('Google Maps API loaded successfully');
+            }};
             document.head.appendChild(script);
+        }}
+        
+        function initializeFallbackMode() {{
+            console.log('Initializing fallback mode without Google Maps');
+            // Hide the map container and show a message
+            const mapContainer = document.getElementById('map');
+            if (mapContainer) {{
+                mapContainer.innerHTML = `
+                    <div style="text-align: center; padding: 40px; background: rgba(255,255,255,0.1); border-radius: 12px; margin: 20px 0;">
+                        <div style="font-size: 48px; margin-bottom: 16px;">📍</div>
+                        <h3>Location Services Available</h3>
+                        <p>Google Maps is temporarily unavailable, but you can still check in to stores!</p>
+                        <p>Click "Update Location" to find nearby stores.</p>
+                    </div>
+                `;
+            }}
         }}
         
         function initializeMap() {{
             try {{
+                if (typeof google === 'undefined' || !google.maps) {{
+                    throw new Error('Google Maps API not loaded');
+                }}
                 map = new google.maps.Map(document.getElementById('map'), {{
                     zoom: 12, center: {{ lat: 42.3601, lng: -71.0589 }}, mapId: 'ENHANCED_LOCATION_BOT_MAP'
                 }});
@@ -1986,7 +2015,8 @@ def enhanced_index():
                 setTimeout(() => hideStatus(), 2000);
             }} catch (error) {{
                 console.error('Map initialization error:', error);
-                showStatus('❌ Map initialization failed', 'error');
+                showStatus('⚠️ Map initialization failed - using fallback mode', 'warning');
+                initializeFallbackMode();
             }}
         }}
         
@@ -2003,7 +2033,9 @@ def enhanced_index():
                 const {{ latitude, longitude }} = position.coords;
                 userLocation = {{ lat: latitude, lng: longitude }};
                 
-                showUserLocation(latitude, longitude);
+                if (map) {{
+                    showUserLocation(latitude, longitude);
+                }}
                 await searchNearbyStores(latitude, longitude);
                 
                 button.innerHTML = '✅ Location Shared!';
