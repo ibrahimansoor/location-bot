@@ -361,7 +361,7 @@ def get_comprehensive_store_database():
     """Focused store database - only Target, Walmart, BJ's, and Best Buy for fast check-ins"""
     return [
         # Primary stores (Priority 1) - Exactly what you want
-        StoreConfig("Target", "Target", "🎯", "Department", 1, ["Target", "Target Store", "Target Corporation", "Target Superstore", "Target retail", "Target department store"]),
+        StoreConfig("Target", "Target", "🎯", "Department", 1, ["Target", "Target Store", "Target Corporation", "Target Superstore", "Target retail", "Target department store", "471 Salem St", "Salem St Target", "Medford Target"]),
         StoreConfig("Walmart", "Walmart", "🏪", "Superstore", 1, ["Walmart", "Walmart Supercenter"]),
         StoreConfig("BJ's Wholesale Club", "BJs", "🛒", "Wholesale", 1, ["BJ's", "BJs", "BJ's Wholesale"]),
         StoreConfig("Best Buy", "Best Buy", "🔌", "Electronics", 1, ["Best Buy", "BestBuy"]),
