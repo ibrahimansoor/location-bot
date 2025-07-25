@@ -2261,8 +2261,8 @@ def api_search_stores_enhanced():
         except (ValueError, TypeError):
             return jsonify({"error": "Invalid coordinates provided"}), 400
         
-        # Validate coordinate ranges
-        if not (42.40 <= lat <= 42.45 and -71.15 <= lng <= -71.05):
+        # Validate coordinate ranges (allow any valid coordinates)
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
             return jsonify({"error": "Coordinates outside valid range"}), 400
         
         # Validate and parse radius
