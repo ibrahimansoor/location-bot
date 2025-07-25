@@ -1991,9 +1991,13 @@ def enhanced_index():
             showStatus('📍 Requesting location access...', 'info');
             
             try {{
-                const position = await getCurrentPosition({{ enableHighAccuracy: true, timeout: 15000, maximumAge: 300000 }});
+                const position = await getCurrentPosition({{ enableHighAccuracy: true, timeout: 30000, maximumAge: 60000 }});
                 const {{ latitude, longitude }} = position.coords;
                 userLocation = {{ lat: latitude, lng: longitude }};
+                
+                console.log('GPS Location obtained:', {{ lat: latitude, lng: longitude }});
+                console.log('Location accuracy:', position.coords.accuracy, 'meters');
+                console.log('Location URL:', `https://www.google.com/maps?q=${{latitude}},${{longitude}}`);
                 
                 showUserLocation(latitude, longitude);
                 await searchNearbyStores(latitude, longitude);
@@ -2030,12 +2034,18 @@ def enhanced_index():
                     <div style="text-align: center; padding: 40px; background: rgba(255,255,255,0.1); border-radius: 12px; margin: 20px 0;">
                         <div style="font-size: 48px; margin-bottom: 16px;">✅</div>
                         <h3>Location Captured!</h3>
-                        <p>Latitude: ${{lat.toFixed(4)}}</p>
-                        <p>Longitude: ${{lng.toFixed(4)}}</p>
+                        <p>Latitude: ${{lat.toFixed(6)}}</p>
+                        <p>Longitude: ${{lng.toFixed(6)}}</p>
+                        <p><a href="https://www.google.com/maps?q=${{lat}},${{lng}}" target="_blank" style="color: #007bff;">📍 Verify Location on Google Maps</a></p>
                         <p>Searching for nearby stores...</p>
+                        <button onclick="retryLocation()" style="margin-top: 10px; padding: 8px 16px; background: var(--primary-blue); color: white; border: none; border-radius: 8px; cursor: pointer;">Retry Location</button>
                     </div>
                 `;
             }}
+        }}
+        
+        function retryLocation() {{
+            shareLocation();
         }}
         
 
