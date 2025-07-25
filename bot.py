@@ -1,3 +1,5 @@
+# Simplified Location Bot - Store Check-ins
+# Last updated: 2024-01-25 - Simplified for essential info only
 import discord
 from discord.ext import commands, tasks
 import os
