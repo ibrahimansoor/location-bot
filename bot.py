@@ -124,7 +124,7 @@ class EnhancedLocationCache:
     def _get_cache_key(self, lat: float, lng: float, radius: int, category: str = None) -> str:
         rounded_lat = round(lat, 3)
         rounded_lng = round(lng, 3)
-        base_key = f"stores:{rounded_lat}:{rounded_lng}:{radius}"
+        base_key = f"stores_v2:{rounded_lat}:{rounded_lng}:{radius}"  # Added v2 to force cache refresh
         return f"{base_key}:{category}" if category else base_key
     
     def get(self, lat: float, lng: float, radius: int, category: str = None) -> Optional[List[Dict]]:
@@ -604,8 +604,8 @@ def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 1
         unique_stores = filtered_stores
         safe_print(f"🔍 Filtered to {len(unique_stores)} stores (Target, Walmart, BJ's, Best Buy only)")
         
-        # Cache the results
-        cache_ttl = 1800 if len(unique_stores) > 0 else 300  # Cache longer if we found results
+        # Cache the results (shorter TTL to ensure fresh results)
+        cache_ttl = 300 if len(unique_stores) > 0 else 60  # Shorter cache for fresh results
         store_cache.set(lat, lng, radius_meters, unique_stores, category, cache_ttl)
         
         return unique_stores
