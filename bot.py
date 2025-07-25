@@ -413,7 +413,9 @@ def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 1
     
     # Special case: Add Medford Target if user is in Medford area
     medford_target = None
-    if 42.40 <= lat <= 42.45 and -71.12 <= lng <= -71.09:  # Medford area coordinates
+    safe_print(f"🔍 Checking Medford area: lat={lat}, lng={lng}")
+    if 42.40 <= lat <= 42.45 and -71.15 <= lng <= -71.05:  # Expanded Medford area coordinates
+        safe_print(f"🎯 User is in Medford area! Adding Medford Target")
         medford_target = {
             "name": "Target",
             "address": "471 Salem St, Medford, MA 02155, USA",
