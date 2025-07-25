@@ -1041,13 +1041,17 @@ async def location_command(interaction: discord.Interaction):
     """Simple location sharing for store check-ins"""
     global LOCATION_CHANNEL_ID, LOCATION_USER_INFO
     
+    # Store interaction details for fallback
+    channel = interaction.channel
+    user = interaction.user
+    
     try:
-        # Respond immediately with a simple message to prevent timeout
-        await interaction.response.send_message("📍 Creating location session...", ephemeral=True)
-        
-        # Check permissions
+        # Check permissions first
         if not check_user_permissions(interaction.user.id, 'user'):
-            await interaction.edit_original_response(content="❌ You don't have permission to use this command.")
+            try:
+                await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
+            except:
+                await channel.send(f"{user.mention} ❌ You don't have permission to use this command.")
             return
         
         # Get Railway URL
@@ -1101,8 +1105,13 @@ async def location_command(interaction: discord.Interaction):
         embed.set_footer(text="Location Bot • Simple store check-ins")
         embed.timestamp = discord.utils.utcnow()
         
-        # Update the response with the full embed
-        await interaction.edit_original_response(content=None, embed=embed)
+        # Try to respond to interaction first
+        try:
+            await interaction.response.send_message(embed=embed)
+        except Exception as interaction_error:
+            # If interaction fails, send as regular channel message
+            safe_print(f"⚠️ Interaction failed, sending channel message: {interaction_error}")
+            await channel.send(f"{user.mention}", embed=embed)
         
         safe_print(f"🔗 Using Railway URL: {railway_url}")
         
@@ -1121,31 +1130,40 @@ async def location_command(interaction: discord.Interaction):
         
     except Exception as e:
         error_id = handle_error(e, "Location command")
+        error_message = f"❌ Error creating location session (ID: {error_id})"
+        
+        # Try multiple ways to send error message
         try:
-            await interaction.edit_original_response(content=f"❌ Error creating location session (ID: {error_id})")
+            await interaction.response.send_message(error_message, ephemeral=True)
         except:
-            # If interaction fails, try to send a new message
             try:
-                await interaction.channel.send(f"❌ Error creating location session (ID: {error_id})")
+                await channel.send(f"{user.mention} {error_message}")
             except:
-                pass
+                safe_print(f"❌ Could not send error message to user: {error_message}")
 
 @bot.tree.command(name="search", description="Search for specific store types near you")
 async def search_command(interaction: discord.Interaction, 
                         category: str = None, 
                         radius: int = 10):
     """Enhanced store search command"""
+    # Store interaction details for fallback
+    channel = interaction.channel
+    user = interaction.user
+    
     try:
-        # Respond immediately with a simple message to prevent timeout
-        await interaction.response.send_message("🔍 Creating search session...", ephemeral=True)
-        
         # Check permissions
         if not check_user_permissions(interaction.user.id, 'user'):
-            await interaction.edit_original_response(content="❌ You don't have permission to use this command.")
+            try:
+                await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
+            except:
+                await channel.send(f"{user.mention} ❌ You don't have permission to use this command.")
             return
         
         if radius < 1 or radius > 50:
-            await interaction.edit_original_response(content="❌ Radius must be between 1 and 50 miles.")
+            try:
+                await interaction.response.send_message("❌ Radius must be between 1 and 50 miles.", ephemeral=True)
+            except:
+                await channel.send(f"{user.mention} ❌ Radius must be between 1 and 50 miles.")
             return
         
         # Get Railway URL
@@ -1177,7 +1195,10 @@ async def search_command(interaction: discord.Interaction,
                 category_list = ", ".join(f"`{cat}`" for cat in sorted(categories))
                 embed.add_field(name="Categories", value=category_list, inline=False)
                 
-                await interaction.edit_original_response(content=None, embed=embed)
+                try:
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
+                except:
+                    await channel.send(f"{user.mention}", embed=embed)
                 return
         
         # Create embed
@@ -1208,19 +1229,26 @@ async def search_command(interaction: discord.Interaction,
         
         embed.set_footer(text="Enhanced Store Search • Real-time Google Places Data")
         
-        # Update the response with the full embed
-        await interaction.edit_original_response(content=None, embed=embed)
+        # Try to respond to interaction first
+        try:
+            await interaction.response.send_message(embed=embed)
+        except Exception as interaction_error:
+            # If interaction fails, send as regular channel message
+            safe_print(f"⚠️ Interaction failed, sending channel message: {interaction_error}")
+            await channel.send(f"{user.mention}", embed=embed)
         
     except Exception as e:
         error_id = handle_error(e, "Search command")
+        error_message = f"❌ Error with search command (ID: {error_id})"
+        
+        # Try multiple ways to send error message
         try:
-            await interaction.edit_original_response(content=f"❌ Error with search command (ID: {error_id})")
+            await interaction.response.send_message(error_message, ephemeral=True)
         except:
-            # If interaction fails, try to send a new message
             try:
-                await interaction.channel.send(f"❌ Error with search command (ID: {error_id})")
+                await channel.send(f"{user.mention} {error_message}")
             except:
-                pass
+                safe_print(f"❌ Could not send error message to user: {error_message}")
 
 @bot.tree.command(name="favorites", description="Manage your favorite locations")
 async def favorites_command(interaction: discord.Interaction, 
