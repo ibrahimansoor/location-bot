@@ -1042,46 +1042,29 @@ async def location_command(interaction: discord.Interaction):
     global LOCATION_CHANNEL_ID, LOCATION_USER_INFO
     
     try:
-        # Respond immediately to prevent timeout
-        await interaction.response.defer(thinking=True)
-        
+        # Check permissions first (fast check)
         if not check_user_permissions(interaction.user.id, 'user'):
-            await interaction.followup.send("❌ You don't have permission to use this command.", ephemeral=True)
+            await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
             return
         
-        LOCATION_CHANNEL_ID = interaction.channel.id
-        session_id = str(uuid.uuid4())
-        
-        # Store user info
-        user_key = f"{interaction.channel.id}_{interaction.user.id}"
-        LOCATION_USER_INFO[user_key] = {
-            'user_id': interaction.user.id,
-            'username': interaction.user.display_name,
-            'full_username': str(interaction.user),
-            'avatar_url': interaction.user.display_avatar.url,
-            'timestamp': discord.utils.utcnow(),
-            'session_id': session_id
-        }
-        
-        # Get Railway URL from environment or use a fallback
+        # Get Railway URL immediately (fast operation)
         railway_url = os.getenv('RAILWAY_URL')
         if not railway_url:
-            # Try to get from Railway's environment
             railway_url = os.getenv('RAILWAY_STATIC_URL') or os.getenv('PORT') or 'https://location-bot-production.up.railway.app'
             if railway_url and not railway_url.startswith('http'):
                 railway_url = f"https://location-bot-production.up.railway.app"
         
         # If still no URL, try to construct from Railway's environment
         if not railway_url or 'your-app' in railway_url:
-            # Try to get the actual Railway URL from environment
             railway_project_name = os.getenv('RAILWAY_PROJECT_NAME', 'location-bot')
             railway_service_name = os.getenv('RAILWAY_SERVICE_NAME', 'web')
             railway_url = f"https://{railway_project_name}-{railway_service_name}.up.railway.app"
         
-        safe_print(f"🔗 Using Railway URL: {railway_url}")
-        
+        # Generate session ID and URL (fast operations)
+        session_id = str(uuid.uuid4())
         website_url = f"{railway_url}?session={session_id}&user={interaction.user.id}&channel={interaction.channel.id}"
         
+        # Create embed (fast operation)
         embed = discord.Embed(
             title="📍 Location Sharing",
             description=f"**{interaction.user.display_name}** wants to share their location",
@@ -1103,8 +1086,24 @@ async def location_command(interaction: discord.Interaction):
         embed.set_footer(text="Location Bot • Simple store check-ins")
         embed.timestamp = discord.utils.utcnow()
         
-        await interaction.followup.send(embed=embed)
+        # Respond immediately
+        await interaction.response.send_message(embed=embed)
         
+        # Store user info after responding (background operation)
+        LOCATION_CHANNEL_ID = interaction.channel.id
+        user_key = f"{interaction.channel.id}_{interaction.user.id}"
+        LOCATION_USER_INFO[user_key] = {
+            'user_id': interaction.user.id,
+            'username': interaction.user.display_name,
+            'full_username': str(interaction.user),
+            'avatar_url': interaction.user.display_avatar.url,
+            'timestamp': discord.utils.utcnow(),
+            'session_id': session_id
+        }
+        
+        safe_print(f"🔗 Using Railway URL: {railway_url}")
+        
+        # Log analytics in background
         log_analytics(
             interaction.user.id,
             "location_session_created",
@@ -1120,9 +1119,9 @@ async def location_command(interaction: discord.Interaction):
     except Exception as e:
         error_id = handle_error(e, "Location command")
         try:
-            await interaction.followup.send(f"❌ Error creating location session (ID: {error_id})", ephemeral=True)
+            await interaction.response.send_message(f"❌ Error creating location session (ID: {error_id})", ephemeral=True)
         except:
-            # If followup fails, try to send a new message
+            # If interaction fails, try to send a new message
             try:
                 await interaction.channel.send(f"❌ Error creating location session (ID: {error_id})")
             except:
@@ -1134,54 +1133,37 @@ async def search_command(interaction: discord.Interaction,
                         radius: int = 10):
     """Enhanced store search command"""
     try:
-        # Respond immediately to prevent timeout
-        await interaction.response.defer(thinking=True)
-        
+        # Check permissions first (fast check)
         if not check_user_permissions(interaction.user.id, 'user'):
-            await interaction.followup.send("❌ You don't have permission to use this command.", ephemeral=True)
+            await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
             return
         
         if radius < 1 or radius > 50:
-            await interaction.followup.send("❌ Radius must be between 1 and 50 miles.", ephemeral=True)
+            await interaction.response.send_message("❌ Radius must be between 1 and 50 miles.", ephemeral=True)
             return
         
-        categories = list(set(store.category for store in get_comprehensive_store_database()))
-        
-        if category and category not in categories:
-            embed = discord.Embed(
-                title="📂 Available Store Categories",
-                description="Choose from these categories:",
-                color=0x5865F2
-            )
-            
-            category_list = ", ".join(f"`{cat}`" for cat in sorted(categories))
-            embed.add_field(name="Categories", value=category_list, inline=False)
-            
-            await interaction.followup.send(embed=embed, ephemeral=True)
-            return
-        
-        embed = discord.Embed(
-            title="🔍 Enhanced Store Search",
-            description=f"Use the location portal to search for {category or 'all'} stores within {radius} miles",
-            color=0x5865F2
-        )
-        
-        # Get Railway URL from environment or use a fallback
+        # Get Railway URL immediately (fast operation)
         railway_url = os.getenv('RAILWAY_URL')
         if not railway_url:
-            # Try to get from Railway's environment
             railway_url = os.getenv('RAILWAY_STATIC_URL') or os.getenv('PORT') or 'https://location-bot-production.up.railway.app'
             if railway_url and not railway_url.startswith('http'):
                 railway_url = f"https://location-bot-production.up.railway.app"
         
         # If still no URL, try to construct from Railway's environment
         if not railway_url or 'your-app' in railway_url:
-            # Try to get the actual Railway URL from environment
             railway_project_name = os.getenv('RAILWAY_PROJECT_NAME', 'location-bot')
             railway_service_name = os.getenv('RAILWAY_SERVICE_NAME', 'web')
             railway_url = f"https://{railway_project_name}-{railway_service_name}.up.railway.app"
         
+        # Generate search URL (fast operation)
         search_url = f"{railway_url}?user={interaction.user.id}&channel={interaction.channel.id}&category={category or ''}&radius={radius}"
+        
+        # Create embed (fast operation)
+        embed = discord.Embed(
+            title="🔍 Enhanced Store Search",
+            description=f"Use the location portal to search for {category or 'all'} stores within {radius} miles",
+            color=0x5865F2
+        )
         
         embed.add_field(
             name="🔗 Search Portal",
@@ -1189,7 +1171,23 @@ async def search_command(interaction: discord.Interaction,
             inline=False
         )
         
+        # Check categories after responding (background operation)
         if category:
+            categories = list(set(store.category for store in get_comprehensive_store_database()))
+            if category not in categories:
+                embed = discord.Embed(
+                    title="📂 Available Store Categories",
+                    description="Choose from these categories:",
+                    color=0x5865F2
+                )
+                
+                category_list = ", ".join(f"`{cat}`" for cat in sorted(categories))
+                embed.add_field(name="Categories", value=category_list, inline=False)
+                
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
+            
+            # Add category info to embed
             stores_in_category = [s for s in get_comprehensive_store_database() if s.category == category]
             store_names = ", ".join(s.chain for s in stores_in_category[:10])
             if len(stores_in_category) > 10:
@@ -1203,14 +1201,15 @@ async def search_command(interaction: discord.Interaction,
         
         embed.set_footer(text="Enhanced Store Search • Real-time Google Places Data")
         
-        await interaction.followup.send(embed=embed)
+        # Respond immediately
+        await interaction.response.send_message(embed=embed)
         
     except Exception as e:
         error_id = handle_error(e, "Search command")
         try:
-            await interaction.followup.send(f"❌ Error with search command (ID: {error_id})", ephemeral=True)
+            await interaction.response.send_message(f"❌ Error with search command (ID: {error_id})", ephemeral=True)
         except:
-            # If followup fails, try to send a new message
+            # If interaction fails, try to send a new message
             try:
                 await interaction.channel.send(f"❌ Error with search command (ID: {error_id})")
             except:
