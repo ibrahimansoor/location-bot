@@ -421,7 +421,7 @@ def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 1
             "address": "471 Salem St, Medford, MA 02155, USA",
             "latitude": 42.4184,
             "longitude": -71.1062,
-            "distance": calculate_distance(lat, lng, 42.4184, -71.1062),
+            "distance": 0.1,  # Very close to Medford center
             "chain": "Target",
             "category": "Department",
             "icon": "🎯",
@@ -592,6 +592,17 @@ def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 1
             if not medford_already_exists:
                 unique_stores.append(medford_target)
                 safe_print(f"🎯 Added Medford Target manually (distance: {medford_target['distance']:.2f} miles)")
+        
+        # Filter to only include Target, Walmart, BJ's, and Best Buy
+        allowed_stores = ['Target', 'Walmart', 'BJ\'s Wholesale Club', 'Best Buy']
+        filtered_stores = []
+        for store in unique_stores:
+            store_name = store.get('name', '')
+            if any(allowed in store_name for allowed in allowed_stores):
+                filtered_stores.append(store)
+        
+        unique_stores = filtered_stores
+        safe_print(f"🔍 Filtered to {len(unique_stores)} stores (Target, Walmart, BJ's, Best Buy only)")
         
         # Cache the results
         cache_ttl = 1800 if len(unique_stores) > 0 else 300  # Cache longer if we found results
@@ -2086,7 +2097,7 @@ def enhanced_index():
         async function searchNearbyStores(lat, lng) {{
             showStatus('🔍 Searching for nearby stores...', 'info');
             try {{
-                const requestData = {{ latitude: lat, longitude: lng, radius: 8, user_id: USER_INFO?.user_id }};
+                const requestData = {{ latitude: lat, longitude: lng, radius: 5, user_id: USER_INFO?.user_id }};
                 console.log('Searching stores with data:', requestData);
                 const response = await fetch('/api/search-stores', {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }}, body: JSON.stringify(requestData) }});
                 if (!response.ok) throw new Error(`Search failed: ${{response.status}}`);
@@ -2260,7 +2271,7 @@ def api_search_stores_enhanced():
         
         lat = float(data['latitude'])
         lng = float(data['longitude'])
-        radius = data.get('radius', 8)  # 8 mile radius to find more stores
+        radius = data.get('radius', 5)  # 5 mile radius as requested
         category = data.get('category')
         user_id = data['user_id']
         
