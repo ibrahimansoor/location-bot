@@ -1146,7 +1146,14 @@ async def search_command(interaction: discord.Interaction,
             color=0x5865F2
         )
         
-        railway_url = os.getenv('RAILWAY_URL', 'https://web-production-f0220.up.railway.app')
+        # Get Railway URL from environment or use a fallback
+        railway_url = os.getenv('RAILWAY_URL')
+        if not railway_url:
+            # Try to get from Railway's environment
+            railway_url = os.getenv('RAILWAY_STATIC_URL') or os.getenv('PORT') or 'https://location-bot-production.up.railway.app'
+            if railway_url and not railway_url.startswith('http'):
+                railway_url = f"https://location-bot-production.up.railway.app"
+        
         search_url = f"{railway_url}?user={interaction.user.id}&channel={interaction.channel.id}&category={category or ''}&radius={radius}"
         
         embed.add_field(
@@ -1411,6 +1418,45 @@ async def setperm_command(interaction: discord.Interaction,
     except Exception as e:
         error_id = handle_error(e, "Setperm command")
         await interaction.response.send_message(f"❌ Error setting permissions (ID: {error_id})")
+
+@bot.tree.command(name="url", description="Show the current Railway URL being used")
+async def url_command(interaction: discord.Interaction):
+    """Show the current Railway URL"""
+    try:
+        # Get Railway URL from environment or use a fallback
+        railway_url = os.getenv('RAILWAY_URL')
+        if not railway_url:
+            # Try to get from Railway's environment
+            railway_url = os.getenv('RAILWAY_STATIC_URL') or os.getenv('PORT') or 'https://location-bot-production.up.railway.app'
+            if railway_url and not railway_url.startswith('http'):
+                railway_url = f"https://location-bot-production.up.railway.app"
+        
+        embed = discord.Embed(
+            title="🔗 Railway URL Info",
+            description="Current Railway URL being used by the bot",
+            color=0x5865F2
+        )
+        
+        embed.add_field(
+            name="Current URL",
+            value=f"`{railway_url}`",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="Test Links",
+            value=f"[Test Page]({railway_url}/test) • [Debug Page]({railway_url}/debug) • [Health Check]({railway_url}/health)",
+            inline=False
+        )
+        
+        embed.set_footer(text="Location Bot • URL Debug")
+        embed.timestamp = discord.utils.utcnow()
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+    except Exception as e:
+        error_id = handle_error(e, "URL command")
+        await interaction.response.send_message(f"❌ Error getting URL info (ID: {error_id})", ephemeral=True)
 
 # Enhanced Flask routes
 @app.route('/', methods=['GET'])
