@@ -23,9 +23,10 @@ import uuid
 import hashlib
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import pickle
 from collections import defaultdict
+
 
 # Enhanced Flask app with rate limiting
 app = Flask(__name__)
@@ -405,23 +406,123 @@ def initialize_google_maps():
         gmaps = None
         return False
 
+def search_stores_parallel(store_configs, location, radius_meters, max_stores_per_type):
+    """Search for stores using parallel processing with ThreadPoolExecutor"""
+    if not gmaps:
+        return []
+    
+    def search_single_store(store_config):
+        """Search for a single store type"""
+        try:
+            search_terms = store_config.search_terms or [store_config.query]
+            found_places = []
+            
+            for search_term in search_terms:
+                try:
+                    places_result = gmaps.places_nearby(
+                        location=location,
+                        radius=radius_meters,
+                        keyword=search_term,
+                        type='establishment'
+                    )
+                    found_places = places_result.get('results', [])
+                    if found_places:
+                        break
+                except Exception as e:
+                    safe_print(f"❌ Search term '{search_term}' failed: {e}")
+                    continue
+            
+            return store_config, found_places[:max_stores_per_type]
+        except Exception as e:
+            safe_print(f"❌ Store search failed for {store_config.chain}: {e}")
+            return store_config, []
+    
+    # Use ThreadPoolExecutor for parallel processing
+    all_stores = []
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        # Submit all store searches
+        future_to_config = {
+            executor.submit(search_single_store, config): config 
+            for config in store_configs
+        }
+        
+        # Process results as they complete
+        for future in as_completed(future_to_config):
+            try:
+                store_config, places = future.result()
+                if not places:
+                    continue
+                    
+                # Process places for this store type
+                for place in places:
+                    try:
+                        place_lat = place['geometry']['location']['lat']
+                        place_lng = place['geometry']['location']['lng']
+                        distance = calculate_distance(location[0], location[1], place_lat, place_lng)
+                        
+                        # Skip if too far
+                        max_distance_miles = radius_meters / 1609.34
+                        if distance > max_distance_miles:
+                            continue
+                        
+                        # Get place details
+                        try:
+                            place_details = gmaps.place(
+                                place_id=place['place_id'],
+                                fields=['name', 'formatted_address', 'formatted_phone_number', 'rating', 'user_ratings_total', 'opening_hours', 'website', 'price_level']
+                            )['result']
+                        except Exception as e:
+                            safe_print(f"⚠️ Could not get details for {place.get('name', 'Unknown')}: {e}")
+                            place_details = {}
+                        
+                        store_data = {
+                            'name': place.get('name', store_config.chain),
+                            'address': place.get('formatted_address', 'Address not available'),
+                            'lat': place_lat,
+                            'lng': place_lng,
+                            'distance': distance,
+                            'chain': store_config.chain,
+                            'category': store_config.category,
+                            'icon': store_config.icon,
+                            'priority': store_config.priority,
+                            'place_id': place['place_id'],
+                            'phone': place_details.get('formatted_phone_number'),
+                            'rating': place_details.get('rating'),
+                            'rating_count': place_details.get('user_ratings_total'),
+                            'website': place_details.get('website'),
+                            'price_level': place_details.get('price_level'),
+                            'is_open': place_details.get('opening_hours', {}).get('open_now', False),
+                            'quality_score': calculate_quality_score(place_details, distance),
+                            'verified': 'google_places'
+                        }
+                        
+                        all_stores.append(store_data)
+                        
+                    except Exception as e:
+                        safe_print(f"❌ Error processing place: {e}")
+                        continue
+                        
+            except Exception as e:
+                safe_print(f"❌ Parallel search error: {e}")
+                continue
+    
+    return all_stores
 
-
+# Replace the existing search function with optimized version
 def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 12800, 
                                  category: str = None, max_stores_per_type: int = 3) -> List[Dict]:
-    """Enhanced store search with comprehensive coverage and caching"""
+    """Enhanced store search with parallel processing and caching"""
     
     # Special case: Add Medford Target if user is in Medford area
     medford_target = None
-    safe_print(f"🔍 Checking Medford area: lat={lat}, lng={lng}")
-    if 42.40 <= lat <= 42.45 and -71.15 <= lng <= -71.05:  # Expanded Medford area coordinates
+    if 42.40 <= lat <= 42.45 and -71.15 <= lng <= -71.05:
         safe_print(f"🎯 User is in Medford area! Adding Medford Target")
         medford_target = {
             "name": "Target",
             "address": "471 Salem St, Medford, MA 02155, USA",
             "latitude": 42.4184,
             "longitude": -71.1062,
-            "distance": 0.1,  # Very close to Medford center
+            "distance": 0.1,
             "chain": "Target",
             "category": "Department",
             "icon": "🎯",
@@ -442,7 +543,6 @@ def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 1
         return []
     
     try:
-        all_stores = []
         location = (lat, lng)
         store_configs = get_comprehensive_store_database()
         
@@ -450,130 +550,32 @@ def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 1
         if category:
             store_configs = [s for s in store_configs if s.category.lower() == category.lower()]
         
-        # Group by priority for efficient searching
-        priority_groups = defaultdict(list)
-        for store_config in store_configs:
-            priority_groups[store_config.priority].append(store_config)
+        safe_print(f"🔍 Searching {len(store_configs)} store types in parallel...")
         
-        safe_print(f"🔍 Searching {len(store_configs)} store types in {len(priority_groups)} priority groups")
+        # Use parallel processing for store searches
+        all_stores = search_stores_parallel(store_configs, location, radius_meters, max_stores_per_type)
         
-        # Search by priority (1 = highest priority)
-        for priority in sorted(priority_groups.keys()):
-            safe_print(f"🔍 Priority {priority} stores ({len(priority_groups[priority])} types)...")
-            
-            for store_config in priority_groups[priority]:
-                try:
-                    search_terms = store_config.search_terms or [store_config.query]
-                    
-                    for search_term in search_terms:
-                        try:
-                            safe_print(f"  🔍 Searching: {search_term}")
-                            
-                            # Search for nearby places
-                            places_result = gmaps.places_nearby(
-                                location=location,
-                                radius=radius_meters,
-                                keyword=search_term,
-                                type='establishment'
-                            )
-                            
-                            found_places = places_result.get('results', [])
-                            if found_places:
-                                safe_print(f"    📍 Found {len(found_places)} {store_config.chain} locations")
-                                break  # Found results for this store, no need to try other search terms
-                            
-                        except Exception as search_error:
-                            safe_print(f"    ❌ Search term '{search_term}' failed: {search_error}")
-                            continue
-                    
-                    if not found_places:
-                        continue
-                    
-                    # Process found places (limit per store type)
-                    places_to_process = found_places[:max_stores_per_type]
-                    processed_count = 0
-                    
-                    for place in places_to_process:
-                        try:
-                            place_lat = place['geometry']['location']['lat']
-                            place_lng = place['geometry']['location']['lng']
-                            distance = calculate_distance(lat, lng, place_lat, place_lng)
-                            
-                            # Skip if too far (convert radius to miles)
-                            max_distance_miles = radius_meters / 1609.34
-                            if distance > max_distance_miles:
-                                continue
-                            
-                            # Get detailed place information
-                            place_details = gmaps.place(
-                                place_id=place['place_id'],
-                                fields=[
-                                    'name', 'formatted_address', 'place_id', 'geometry', 
-                                    'rating', 'user_ratings_total', 'formatted_phone_number',
-                                    'opening_hours', 'website', 'business_status', 'price_level',
-                                    'vicinity'
-                                ]
-                            )
-                            
-                            details = place_details.get('result', {})
-                            
-                            # Enhanced opening hours processing
-                            opening_hours = details.get('opening_hours', {})
-                            is_open = opening_hours.get('open_now', None)
-                            weekly_hours = opening_hours.get('weekday_text', [])
-                            
-                            # Business status validation
-                            business_status = details.get('business_status', 'OPERATIONAL')
-                            if business_status in ['CLOSED_PERMANENTLY', 'CLOSED_TEMPORARILY']:
-                                continue
-                            
-                            # Enhanced store data
-                            store_data = {
-                                'name': details.get('name', place.get('name', 'Unknown Store')),
-                                'address': details.get('formatted_address', place.get('vicinity', 'Unknown Address')),
-                                'place_id': place['place_id'],
-                                'lat': place_lat,
-                                'lng': place_lng,
-                                'chain': store_config.chain,
-                                'icon': store_config.icon,
-                                'category': store_config.category,
-                                'priority': store_config.priority,
-                                'distance': distance,
-                                'rating': details.get('rating'),
-                                'rating_count': details.get('user_ratings_total'),
-                                'phone': details.get('formatted_phone_number'),
-                                'website': details.get('website'),
-                                'is_open': is_open,
-                                'weekly_hours': weekly_hours,
-                                'business_status': business_status,
-                                'price_level': details.get('price_level'),
-                                'types': place.get('types', []),
-                                'verified': 'google_places',
-                                'search_timestamp': datetime.utcnow().isoformat(),
-                                'search_radius': radius_meters,
-                                'quality_score': calculate_quality_score(details, distance)
-                            }
-                            
-                            all_stores.append(store_data)
-                            processed_count += 1
-                            
-                        except Exception as place_error:
-                            handle_error(place_error, f"Processing place for {store_config.chain}")
-                            continue
-                    
-                    if processed_count > 0:
-                        safe_print(f"    ✅ Processed {processed_count} {store_config.chain} locations")
-                    
-                    # Rate limiting between store types (reduced for speed)
-                    time.sleep(0.05)
-                    
-                except Exception as store_error:
-                    handle_error(store_error, f"Searching {store_config.chain}")
-                    continue
-            
-            # Shorter pause between priority groups (optimized for speed)
-            if priority < max(priority_groups.keys()):
-                time.sleep(0.1)
+        # Add Medford Target if applicable
+        if medford_target and medford_target['distance'] <= radius_meters / 1609.34:
+            medford_already_exists = any(
+                store.get('place_id') == 'medford_target_manual' or 
+                (store.get('name') == 'Target' and 'Medford' in store.get('address', ''))
+                for store in all_stores
+            )
+            if not medford_already_exists:
+                all_stores.append(medford_target)
+                safe_print(f"🎯 Added Medford Target manually (distance: {medford_target['distance']:.2f} miles)")
+        
+        # Filter to only include Target, Walmart, BJ's, and Best Buy
+        allowed_stores = ['Target', 'Walmart', 'BJ\'s Wholesale Club', 'Best Buy']
+        filtered_stores = []
+        for store in all_stores:
+            store_name = store.get('name', '')
+            if any(allowed in store_name for allowed in allowed_stores):
+                filtered_stores.append(store)
+        
+        all_stores = filtered_stores
+        safe_print(f"🔍 Filtered to {len(all_stores)} stores (Target, Walmart, BJ's, Best Buy only)")
         
         # Remove duplicates and sort
         unique_stores = remove_duplicate_stores(all_stores)
@@ -581,31 +583,8 @@ def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 1
         
         safe_print(f"✅ Found {len(unique_stores)} unique stores (from {len(all_stores)} total)")
         
-        # Add Medford Target if user is in Medford area
-        if medford_target and medford_target['distance'] <= radius_meters / 1609.34:  # Convert meters to miles
-            # Check if Medford Target is already in results
-            medford_already_exists = any(
-                store.get('place_id') == 'medford_target_manual' or 
-                (store.get('name') == 'Target' and 'Medford' in store.get('address', ''))
-                for store in unique_stores
-            )
-            if not medford_already_exists:
-                unique_stores.append(medford_target)
-                safe_print(f"🎯 Added Medford Target manually (distance: {medford_target['distance']:.2f} miles)")
-        
-        # Filter to only include Target, Walmart, BJ's, and Best Buy
-        allowed_stores = ['Target', 'Walmart', 'BJ\'s Wholesale Club', 'Best Buy']
-        filtered_stores = []
-        for store in unique_stores:
-            store_name = store.get('name', '')
-            if any(allowed in store_name for allowed in allowed_stores):
-                filtered_stores.append(store)
-        
-        unique_stores = filtered_stores
-        safe_print(f"🔍 Filtered to {len(unique_stores)} stores (Target, Walmart, BJ's, Best Buy only)")
-        
         # Cache the results (shorter TTL to ensure fresh results)
-        cache_ttl = 300 if len(unique_stores) > 0 else 60  # Shorter cache for fresh results
+        cache_ttl = 300 if len(unique_stores) > 0 else 60
         store_cache.set(lat, lng, radius_meters, unique_stores, category, cache_ttl)
         
         return unique_stores
@@ -2263,70 +2242,70 @@ def enhanced_index():
 @app.route('/api/search-stores', methods=['POST'])
 @limiter.limit("20 per minute")
 def api_search_stores_enhanced():
-    """Enhanced API endpoint for store search"""
+    """Enhanced API endpoint for searching nearby stores with validation"""
     try:
         data = request.get_json()
         if not data:
-            return jsonify({"error": "No data provided"}), 400
+            return jsonify({"error": "No JSON data provided"}), 400
         
-        lat = float(data['latitude'])
-        lng = float(data['longitude'])
-        radius = data.get('radius', 5)  # 5 mile radius as requested
+        # Validate required fields
+        required_fields = ['latitude', 'longitude', 'user_id']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({"error": f"Missing required field: {field}"}), 400
+        
+        # Validate and parse coordinates
+        try:
+            lat = float(data['latitude'])
+            lng = float(data['longitude'])
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid coordinates provided"}), 400
+        
+        # Validate coordinate ranges
+        if not (42.40 <= lat <= 42.45 and -71.15 <= lng <= -71.05):
+            return jsonify({"error": "Coordinates outside valid range"}), 400
+        
+        # Validate and parse radius
+        try:
+            radius = int(data.get('radius', 5))
+            if not (1 <= radius <= 20):
+                return jsonify({"error": "Radius must be between 1 and 20 miles"}), 400
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid radius provided"}), 400
+        
         category = data.get('category')
         user_id = data['user_id']
         
-        safe_print(f"🔍 Search request: lat={lat}, lng={lng}, radius={radius}, user={user_id}")
+        # Validate user_id
+        if not user_id or len(str(user_id)) > 50:
+            return jsonify({"error": "Invalid user_id provided"}), 400
         
-        # Check if Google Maps is available
-        if not gmaps:
-            safe_print("❌ Google Maps API not available")
-            return jsonify({
-                "error": "Google Maps API not available",
-                "status": "error",
-                "stores": [],
-                "total_found": 0
-            }), 503
+        # Log the search request
+        safe_print(f"🔍 API Search request: lat={lat}, lng={lng}, radius={radius}, user={user_id}")
         
-        # Search for stores
-        stores = search_nearby_stores_enhanced(lat, lng, radius * 1609.34, category)  # Convert miles to meters
+        # Perform the search
+        stores = search_nearby_stores_enhanced(lat, lng, radius * 1609.34, category, 3)
         
-        safe_print(f"🔍 Search completed: found {len(stores)} stores")
-        
-        # Group stores by category
-        categorized_stores = defaultdict(list)
-        for store in stores:
-            categorized_stores[store['category']].append(store)
-        
-        safe_print(f"🔍 Enhanced search found {len(stores)} stores in {len(categorized_stores)} categories for user {user_id}")
-        
-        # Log analytics
-        log_analytics(
-            user_id,
-            "simplified_store_search",
-            {
-                "location": {"lat": lat, "lng": lng},
-                "radius": radius,
-                "category": category,
-                "results_count": len(stores),
-                "categories_found": list(categorized_stores.keys())
-            },
-            request_obj=request
-        )
-        
-        return jsonify({
+        # Prepare response
+        response_data = {
             "status": "success",
             "stores": stores,
-            "categorized_stores": dict(categorized_stores),
-            "search_location": {"lat": lat, "lng": lng, "radius": radius},
             "total_found": len(stores),
-            "categories": list(categorized_stores.keys()),
+            "search_location": {"lat": lat, "lng": lng, "radius": radius},
             "search_timestamp": datetime.utcnow().isoformat()
-        }), 200
+        }
+        
+        # Log analytics
+        log_analytics(user_id, "api_search", {
+            "latitude": lat, "longitude": lng, "radius": radius,
+            "stores_found": len(stores), "category": category
+        }, request)
+        
+        return jsonify(response_data), 200
         
     except Exception as e:
-        error_id = handle_error(e, "Enhanced store search API")
-        safe_print(f"❌ Search API error: {e}")
-        return jsonify({"error": f"Internal server error (ID: {error_id})"}), 500
+        error_id = handle_error(e, "API search stores")
+        return jsonify({"error": f"Search failed (ID: {error_id})"}), 500
 
 
 

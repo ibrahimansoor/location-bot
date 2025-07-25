@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Location Bot Portal</title>
+    <meta name="theme-color" content="#5865F2">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📍</text></svg>">
+    
+    <style>
+        :root {
+            --primary-blue: #4285F4;
+            --primary-green: #34A853;
+            --accent-red: #EA4335;
+            --accent-yellow: #FBBC04;
+            --dark-bg: #1a1a2e;
+            --dark-secondary: #16213e;
+            --glass-bg: rgba(255, 255, 255, 0.1);
+            --glass-border: rgba(255, 255, 255, 0.2);
+        }
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, var(--primary-blue) 0%, var(--primary-green) 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            transition: all 0.3s ease;
+        }
+        
+        body.dark-mode {
+            background: linear-gradient(135deg, var(--dark-bg) 0%, var(--dark-secondary) 100%);
+        }
+        
+        .theme-toggle {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            z-index: 1000;
+        }
+        
+        .theme-toggle:hover {
+            transform: scale(1.1);
+            background: var(--glass-border);
+        }
+        
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(30px);
+            border-radius: 24px;
+            padding: 40px;
+            max-width: 800px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+        
+        .dark-mode .container {
+            background: rgba(30, 30, 30, 0.95);
+            color: white;
+        }
+        
+        .header {
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, var(--primary-blue), var(--primary-green));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .dark-mode .header h1 {
+            background: linear-gradient(135deg, #fff, #ccc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .header p {
+            font-size: 1.1rem;
+            color: #666;
+            margin-bottom: 20px;
+        }
+        
+        .dark-mode .header p {
+            color: #ccc;
+        }
+        
+        .location-button {
+            background: linear-gradient(135deg, var(--primary-blue), var(--primary-green));
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 8px 25px rgba(66, 133, 244, 0.3);
+            margin-bottom: 20px;
+        }
+        
+        .location-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 35px rgba(66, 133, 244, 0.4);
+        }
+        
+        .location-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .status {
+            padding: 15px;
+            border-radius: 12px;
+            margin: 20px 0;
+            font-weight: 500;
+            display: none;
+        }
+        
+        .status.info {
+            background: rgba(66, 133, 244, 0.1);
+            color: var(--primary-blue);
+            border: 1px solid rgba(66, 133, 244, 0.2);
+        }
+        
+        .status.success {
+            background: rgba(52, 168, 83, 0.1);
+            color: var(--primary-green);
+            border: 1px solid rgba(52, 168, 83, 0.2);
+        }
+        
+        .status.error {
+            background: rgba(234, 67, 53, 0.1);
+            color: var(--accent-red);
+            border: 1px solid rgba(234, 67, 53, 0.2);
+        }
+        
+        .location-info {
+            background: rgba(66, 133, 244, 0.05);
+            border: 1px solid rgba(66, 133, 244, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+            display: none;
+        }
+        
+        .dark-mode .location-info {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+        
+        .location-info h3 {
+            margin-bottom: 15px;
+            color: var(--primary-blue);
+        }
+        
+        .location-details {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .location-detail {
+            text-align: left;
+        }
+        
+        .location-detail strong {
+            color: var(--primary-blue);
+        }
+        
+        .verify-link {
+            display: inline-block;
+            background: var(--primary-blue);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 0.9rem;
+            margin-top: 10px;
+        }
+        
+        .verify-link:hover {
+            background: var(--primary-green);
+        }
+        
+        .nearby-stores {
+            max-height: 800px;
+            overflow-y: auto;
+            margin-top: 20px;
+            display: none;
+        }
+        
+        .store-item {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: left;
+        }
+        
+        .dark-mode .store-item {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+        
+        .store-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+            border-color: var(--primary-blue);
+        }
+        
+        .store-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .store-icon {
+            font-size: 1.5rem;
+            margin-right: 12px;
+        }
+        
+        .store-name {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .dark-mode .store-name {
+            color: white;
+        }
+        
+        .store-distance {
+            margin-left: auto;
+            background: var(--primary-green);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        
+        .store-address {
+            color: #666;
+            font-size: 0.95rem;
+            margin-bottom: 8px;
+        }
+        
+        .dark-mode .store-address {
+            color: #ccc;
+        }
+        
+        .store-details {
+            display: flex;
+            gap: 20px;
+            font-size: 0.9rem;
+            color: #888;
+        }
+        
+        .dark-mode .store-details {
+            color: #aaa;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .success-screen {
+            text-align: center;
+            padding: 40px 20px;
+            display: none;
+        }
+        
+        .success-icon {
+            font-size: 4rem;
+            margin-bottom: 20px;
+        }
+        
+        .success-message {
+            font-size: 1.3rem;
+            margin-bottom: 15px;
+            color: var(--primary-green);
+        }
+        
+        .retry-button {
+            background: var(--primary-blue);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        
+        .retry-button:hover {
+            background: var(--primary-green);
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px;
+                margin: 10px;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .location-details {
+                grid-template-columns: 1fr;
+            }
+            
+            .store-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .store-distance {
+                margin-left: 0;
+                margin-top: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="theme-toggle" onclick="toggleTheme()">🌙</div>
+    
+    <div class="container">
+        <div class="header">
+            <h1>📍 Location Bot</h1>
+            <p>Share your location and check in to nearby stores</p>
+        </div>
+        
+        <button class="location-button" onclick="shareLocation()" id="locationBtn">
+            📍 Update Location
+        </button>
+        
+        <div class="status" id="status"></div>
+        
+        <div class="location-info" id="locationInfo">
+            <h3>📍 Your Location</h3>
+            <div class="location-details" id="locationDetails"></div>
+            <a href="#" class="verify-link" id="verifyLink" target="_blank">Verify on Google Maps</a>
+            <br>
+            <button class="retry-button" onclick="shareLocation()">🔄 Retry Location</button>
+        </div>
+        
+        <div class="nearby-stores" id="nearbyStores"></div>
+        
+        <div class="success-screen" id="successScreen">
+            <div class="success-icon">✅</div>
+            <div class="success-message">Check-in Successful!</div>
+            <p>Your location has been posted to Discord.</p>
+            <button class="retry-button" onclick="location.reload()">🔄 Check In Again</button>
+        </div>
+    </div>
+    
+    <script>
+        const USER_INFO = {{ user_info_js | safe }};
+        let currentTheme = localStorage.getItem('theme') || 'light';
+        
+        // Apply theme on load
+        document.addEventListener('DOMContentLoaded', function() {
+            applyTheme();
+        });
+        
+        function toggleTheme() {
+            currentTheme = currentTheme === 'light' ? 'dark' : 'light';
+            localStorage.setItem('theme', currentTheme);
+            applyTheme();
+        }
+        
+        function applyTheme() {
+            const body = document.body;
+            const themeToggle = document.querySelector('.theme-toggle');
+            
+            if (currentTheme === 'dark') {
+                body.classList.add('dark-mode');
+                themeToggle.textContent = '☀️';
+            } else {
+                body.classList.remove('dark-mode');
+                themeToggle.textContent = '🌙';
+            }
+        }
+        
+        function showStatus(message, type = 'info') {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status ${type}`;
+            status.style.display = 'block';
+            
+            if (type === 'success') {
+                setTimeout(() => {
+                    status.style.display = 'none';
+                }, 5000);
+            }
+        }
+        
+        function showUserLocation(latitude, longitude, accuracy) {
+            const locationInfo = document.getElementById('locationInfo');
+            const locationDetails = document.getElementById('locationDetails');
+            const verifyLink = document.getElementById('verifyLink');
+            
+            locationDetails.innerHTML = `
+                <div class="location-detail">
+                    <strong>Latitude:</strong> ${latitude.toFixed(6)}
+                </div>
+                <div class="location-detail">
+                    <strong>Longitude:</strong> ${longitude.toFixed(6)}
+                </div>
+                <div class="location-detail">
+                    <strong>Accuracy:</strong> ${accuracy} meters
+                </div>
+                <div class="location-detail">
+                    <strong>Status:</strong> ✅ Location obtained
+                </div>
+            `;
+            
+            verifyLink.href = `https://www.google.com/maps?q=${latitude},${longitude}`;
+            locationInfo.style.display = 'block';
+            
+            console.log('GPS Location obtained:', { lat: latitude, lng: longitude });
+            console.log('Location accuracy:', accuracy, 'meters');
+            console.log('Location URL:', `https://www.google.com/maps?q=${latitude},${longitude}`);
+            
+            // Search for nearby stores
+            searchNearbyStores(latitude, longitude);
+        }
+        
+        async function searchNearbyStores(lat, lng) {
+            if (!USER_INFO) {
+                showStatus('❌ Session information not available', 'error');
+                return;
+            }
+            
+            showStatus('🔍 Searching for nearby stores...', 'info');
+            try {
+                const requestData = { latitude: lat, longitude: lng, radius: 5, user_id: USER_INFO?.user_id };
+                console.log('Searching stores with data:', requestData);
+                const response = await fetch('/api/search-stores', { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' }, 
+                    body: JSON.stringify(requestData) 
+                });
+                
+                const data = await response.json();
+                console.log('Search response:', data);
+                console.log('Number of stores found:', data.stores ? data.stores.length : 0);
+                
+                if (data.status === 'success' && data.stores) {
+                    displayStoresList(data.stores);
+                    showStatus(`✅ Found ${data.stores.length} stores nearby`, 'success');
+                } else {
+                    showStatus('❌ No stores found or search failed', 'error');
+                }
+            } catch (error) {
+                console.error('Search error:', error);
+                showStatus('❌ Error searching for stores', 'error');
+            }
+        }
+        
+        function displayStoresList(stores) {
+            const storesContainer = document.getElementById('nearbyStores');
+            console.log('Displaying stores list. Container found:', !!storesContainer);
+            console.log('Number of stores to display:', stores.length);
+            
+            if (!storesContainer) return;
+            
+            if (stores.length === 0) {
+                storesContainer.innerHTML = '<p>No stores found in your area.</p>';
+                storesContainer.style.display = 'block';
+                return;
+            }
+            
+            // Group stores by category
+            const categories = {};
+            stores.forEach(store => {
+                const category = store.category || 'Other';
+                if (!categories[category]) {
+                    categories[category] = [];
+                }
+                categories[category].push(store);
+            });
+            
+            console.log('Categories found:', Object.keys(categories));
+            
+            let html = '';
+            Object.keys(categories).forEach(category => {
+                html += `<h3>${category}</h3>`;
+                categories[category].forEach(store => {
+                    const distance = store.distance ? `${store.distance.toFixed(1)} miles` : 'Unknown';
+                    const address = store.address || 'Address not available';
+                    
+                    html += `
+                        <div class="store-item" onclick="selectStore('${store.name}', '${address}', ${store.distance}, '${store.icon}')">
+                            <div class="store-header">
+                                <span class="store-icon">${store.icon}</span>
+                                <span class="store-name">${store.name}</span>
+                                <span class="store-distance">${distance}</span>
+                            </div>
+                            <div class="store-address">${address}</div>
+                            <div class="store-details">
+                                ${store.phone ? `<span>📞 ${store.phone}</span>` : ''}
+                                ${store.rating ? `<span>⭐ ${store.rating}/5</span>` : ''}
+                            </div>
+                        </div>
+                    `;
+                });
+            });
+            
+            storesContainer.innerHTML = html;
+            storesContainer.style.display = 'block';
+        }
+        
+        async function selectStore(storeName, storeAddress, distance, icon) {
+            if (!USER_INFO) {
+                showStatus('❌ Session information not available', 'error');
+                return;
+            }
+            
+            showStatus('📤 Posting to Discord...', 'info');
+            
+            try {
+                const checkInData = {
+                    user_id: USER_INFO.user_id,
+                    session_id: USER_INFO.session_id,
+                    channel_id: USER_INFO.channel_id,
+                    store_name: storeName,
+                    store_address: storeAddress,
+                    distance: distance,
+                    icon: icon,
+                    timestamp: new Date().toISOString()
+                };
+                
+                console.log('Check-in data:', checkInData);
+                
+                const response = await fetch('/webhook/location', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(checkInData)
+                });
+                
+                const responseData = await response.json();
+                console.log('Check-in response:', responseData);
+                
+                if (response.ok && responseData.status === 'success') {
+                    // Show success screen
+                    document.getElementById('nearbyStores').style.display = 'none';
+                    document.getElementById('locationInfo').style.display = 'none';
+                    document.getElementById('successScreen').style.display = 'block';
+                    showStatus('✅ Check-in successful! Posted to Discord.', 'success');
+                } else {
+                    showStatus('❌ Failed to post to Discord', 'error');
+                }
+            } catch (error) {
+                console.error('Check-in error:', error);
+                showStatus('❌ Error posting to Discord', 'error');
+            }
+        }
+        
+        function shareLocation() {
+            const button = document.getElementById('locationBtn');
+            button.disabled = true;
+            button.innerHTML = '<span class="loading"></span> Getting location...';
+            
+            if (!navigator.geolocation) {
+                showStatus('❌ Geolocation is not supported by this browser', 'error');
+                button.disabled = false;
+                button.textContent = '📍 Update Location';
+                return;
+            }
+            
+            const options = {
+                enableHighAccuracy: true,
+                timeout: 30000,
+                maximumAge: 60000
+            };
+            
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    const latitude = position.coords.latitude;
+                    const longitude = position.coords.longitude;
+                    const accuracy = position.coords.accuracy;
+                    
+                    button.disabled = false;
+                    button.textContent = '📍 Update Location';
+                    
+                    showUserLocation(latitude, longitude, accuracy);
+                },
+                function(error) {
+                    button.disabled = false;
+                    button.textContent = '📍 Update Location';
+                    
+                    let errorMessage = '❌ Unable to get your location';
+                    switch(error.code) {
+                        case error.PERMISSION_DENIED:
+                            errorMessage = '❌ Location permission denied. Please allow location access.';
+                            break;
+                        case error.POSITION_UNAVAILABLE:
+                            errorMessage = '❌ Location information unavailable';
+                            break;
+                        case error.TIMEOUT:
+                            errorMessage = '❌ Location request timed out';
+                            break;
+                    }
+                    showStatus(errorMessage, 'error');
+                },
+                options
+            );
+        }
+    </script>
+</body>
+</html> 
