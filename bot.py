@@ -2283,8 +2283,20 @@ def api_search_stores_enhanced():
         # Log the search request
         safe_print(f"🔍 API Search request: lat={lat}, lng={lng}, radius={radius}, user={user_id}")
         
+        # Check if Google Maps is available
+        if not gmaps:
+            safe_print("❌ Google Maps API not available")
+            return jsonify({
+                "error": "Google Maps API not available",
+                "status": "error",
+                "stores": [],
+                "total_found": 0
+            }), 503
+        
         # Perform the search
+        safe_print(f"🔍 Starting search with gmaps={gmaps is not None}")
         stores = search_nearby_stores_enhanced(lat, lng, radius * 1609.34, category, 3)
+        safe_print(f"🔍 Search completed: found {len(stores)} stores")
         
         # Prepare response
         response_data = {
