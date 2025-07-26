@@ -2763,6 +2763,9 @@ def simplified_location_webhook():
         # Save to database with minimal data
         if user_id and selected_store_data:
             try:
+                # Get channel ID from data or use global
+                channel_id = data.get('channel_id') or LOCATION_CHANNEL_ID
+                
                 with db_pool.get_connection() as conn:
                     conn.execute('''
                         INSERT INTO user_locations 
@@ -2771,7 +2774,7 @@ def simplified_location_webhook():
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         str(user_id),
-                        str(LOCATION_CHANNEL_ID),
+                        str(channel_id) if channel_id else None,
                         data.get('guild_id'),
                         lat, lng,
                         data.get('accuracy'),
@@ -2840,13 +2843,20 @@ async def post_enhanced_location_to_discord(location_data):
     global LOCATION_CHANNEL_ID, bot_ready, bot_connected, LOCATION_USER_INFO
     
     try:
-        if not bot_connected or not bot_ready or not LOCATION_CHANNEL_ID:
-            safe_print("❌ Bot or channel not ready for posting")
+        if not bot_connected or not bot_ready:
+            safe_print("❌ Bot not ready for posting")
             return False
         
-        channel = bot.get_channel(LOCATION_CHANNEL_ID)
+        # Get channel ID from location data or use global
+        channel_id = location_data.get('channel_id') or LOCATION_CHANNEL_ID
+        
+        if not channel_id:
+            safe_print("❌ No channel ID available for posting")
+            return False
+        
+        channel = bot.get_channel(int(channel_id))
         if not channel:
-            safe_print(f"❌ Channel {LOCATION_CHANNEL_ID} not found")
+            safe_print(f"❌ Channel {channel_id} not found")
             return False
         
         lat = float(location_data['latitude'])
@@ -2864,7 +2874,7 @@ async def post_enhanced_location_to_discord(location_data):
         avatar_url = None
         
         if user_id:
-            user_key = f"{LOCATION_CHANNEL_ID}_{user_id}"
+            user_key = f"{channel_id}_{user_id}"
             if user_key in LOCATION_USER_INFO:
                 user_info = LOCATION_USER_INFO[user_key]
                 username = user_info['username']
