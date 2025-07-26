@@ -519,40 +519,28 @@
                 return;
             }
             
-            // Group stores by category
-            const categories = {};
+            // Simple list, no categories needed for 4 stores
+            let html = '<h3>Select a Store to Check In:</h3>';
             stores.forEach(store => {
-                const category = store.category || 'Other';
-                if (!categories[category]) {
-                    categories[category] = [];
-                }
-                categories[category].push(store);
-            });
-            
-            console.log('Categories found:', Object.keys(categories));
-            
-            let html = '';
-            Object.keys(categories).forEach(category => {
-                html += `<h3>${category}</h3>`;
-                categories[category].forEach(store => {
-                    const distance = store.distance ? `${store.distance.toFixed(1)} miles` : 'Unknown';
-                    const address = store.address || 'Address not available';
-                    
-                    html += `
-                        <div class="store-item" onclick="selectStore('${store.place_id}')">
-                            <div class="store-header">
-                                <span class="store-icon">${store.icon}</span>
-                                <span class="store-name">${store.name}</span>
-                                <span class="store-distance">${distance}</span>
+                const distance = store.distance ? `${store.distance.toFixed(1)} miles` : 'Unknown';
+                const address = store.address || 'Address not available';
+                
+                html += `
+                    <div class="store-item" onclick="selectStore('${store.place_id}')">
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <div>
+                                <span style="font-size: 24px; margin-right: 10px;">${store.icon}</span>
+                                <strong>${store.name}</strong>
                             </div>
-                            <div class="store-address">${address}</div>
-                            <div class="store-details">
-                                ${store.phone ? `<span>📞 ${store.phone}</span>` : ''}
-                                ${store.rating ? `<span>⭐ ${store.rating}/5</span>` : ''}
+                            <div style="background: #4285F4; color: white; padding: 5px 15px; border-radius: 20px;">
+                                ${distance}
                             </div>
                         </div>
-                    `;
-                });
+                        <div style="margin-left: 40px; color: #666; font-size: 14px;">
+                            ${address}
+                        </div>
+                    </div>
+                `;
             });
             
             storesContainer.innerHTML = html;

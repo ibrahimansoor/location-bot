@@ -368,6 +368,15 @@ def get_comprehensive_store_database():
         StoreConfig("Best Buy", "Best Buy", "🔌", "Electronics", 1, ["Best Buy", "BestBuy"]),
     ]
 
+def get_quick_stores():
+    """Get the 4 primary stores for quick check-ins"""
+    return [
+        {"name": "Target", "icon": "🎯", "keywords": ["target", "bullseye"]},
+        {"name": "Walmart", "icon": "🏪", "keywords": ["walmart", "wal-mart"]},
+        {"name": "BJ's Wholesale Club", "icon": "🛒", "keywords": ["bjs", "bj's", "wholesale"]},
+        {"name": "Best Buy", "icon": "🔌", "keywords": ["best buy", "bestbuy", "electronics"]}
+    ]
+
 def initialize_google_maps():
     """Enhanced Google Maps initialization"""
     global gmaps
@@ -1033,18 +1042,24 @@ def format_phone_number(phone: str) -> str:
 
 def get_railway_url():
     """Get Railway URL with proper fallback logic"""
-    # Priority 1: RAILWAY_STATIC_URL
-    railway_static = os.getenv('RAILWAY_STATIC_URL')
-    if railway_static and railway_static.startswith('http'):
-        return railway_static
+    # Try environment variables first
+    for env_var in ['RAILWAY_STATIC_URL', 'RAILWAY_PUBLIC_DOMAIN', 'RAILWAY_URL']:
+        url = os.getenv(env_var)
+        if url and url.startswith('http') and 'your-app' not in url:
+            safe_print(f"🔗 Using Railway URL from {env_var}: {url}")
+            return url
     
-    # Priority 2: RAILWAY_URL (if valid)
-    railway_url = os.getenv('RAILWAY_URL')
-    if railway_url and railway_url.startswith('http') and 'your-app' not in railway_url:
-        return railway_url
+    # If no valid URL found, construct from Railway environment
+    project = os.getenv('RAILWAY_PROJECT_ID', '')
+    if project:
+        constructed_url = f"https://{project}.up.railway.app"
+        safe_print(f"🔗 Constructed Railway URL: {constructed_url}")
+        return constructed_url
     
-    # Priority 3: Fallback
-    return 'https://web-production-f0220.up.railway.app'
+    # Last resort fallback
+    fallback_url = 'https://web-production-f0220.up.railway.app'
+    safe_print(f"🔗 Using fallback Railway URL: {fallback_url}")
+    return fallback_url
 
 def construct_address_from_place(place: dict, place_details: dict) -> str:
     """Construct a proper address from available place data"""
@@ -2808,6 +2823,17 @@ def debug_endpoint():
     except Exception as e:
         error_id = handle_error(e, "Debug endpoint")
         return jsonify({"error": f"Debug failed (ID: {error_id})"}), 500
+
+@app.route('/simple-debug', methods=['GET'])
+def simple_debug():
+    """Super simple debug endpoint"""
+    return jsonify({
+        "status": "ok",
+        "bot_ready": bot_ready,
+        "timestamp": datetime.now().isoformat(),
+        "stores": len(get_comprehensive_store_database()),
+        "railway_url": get_railway_url()
+    })
 
 if __name__ == "__main__":
     main()
