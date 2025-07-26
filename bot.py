@@ -338,7 +338,7 @@ def init_enhanced_database():
                 latitude REAL NOT NULL,
                 longitude REAL NOT NULL,
                 accuracy REAL,
-                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_updated TEXT DEFAULT (datetime('now')),
                 store_preference TEXT DEFAULT 'all',
                 FOREIGN KEY (user_id) REFERENCES user_permissions(user_id)
             )
@@ -819,7 +819,7 @@ def save_last_location(user_id: str, lat: float, lng: float, accuracy: float = N
             conn.execute('''
                 INSERT OR REPLACE INTO last_locations 
                 (user_id, latitude, longitude, accuracy, last_updated)
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, datetime('now'))
             ''', (user_id, lat, lng, accuracy))
             conn.commit()
             safe_print(f"💾 Saved last location for user {user_id}: {lat}, {lng}")
@@ -1286,30 +1286,26 @@ async def location_command(interaction: discord.Interaction):
         embed.set_footer(text="Location Bot • Simple store check-ins")
         embed.timestamp = discord.utils.utcnow()
         
-        # Add quick check-in buttons
+        # Add quick check-in buttons (URL buttons only - no custom_id)
         view = discord.ui.View()
         view.add_item(discord.ui.Button(
             label="🎯 Quick Target Check-in", 
             style=discord.ButtonStyle.danger,
-            custom_id="quick_target",
             url=website_url
         ))
         view.add_item(discord.ui.Button(
             label="🏪 Quick Walmart Check-in", 
             style=discord.ButtonStyle.primary,
-            custom_id="quick_walmart",
             url=website_url
         ))
         view.add_item(discord.ui.Button(
             label="🛒 Quick BJ's Check-in", 
             style=discord.ButtonStyle.success,
-            custom_id="quick_bjs",
             url=website_url
         ))
         view.add_item(discord.ui.Button(
             label="🔌 Quick Best Buy Check-in", 
             style=discord.ButtonStyle.secondary,
-            custom_id="quick_bestbuy",
             url=website_url
         ))
         
