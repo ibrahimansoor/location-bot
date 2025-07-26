@@ -94,12 +94,12 @@ def test_webhook():
     if 'your-app' in railway_url:
         railway_url = 'https://web-production-f0220.up.railway.app'
     
-    # Test webhook with sample data
+    # Test webhook with more realistic data
     test_data = {
         'latitude': 42.4184,
         'longitude': -71.1062,
         'user_id': '123456789',
-        'channel_id': '987654321',
+        'channel_id': '987654321',  # This is a fake channel ID for testing
         'selectedStore': {
             'name': 'Target',
             'address': '471 Salem St, Medford, MA 02155, USA',
@@ -122,6 +122,47 @@ def test_webhook():
             print("✅ Webhook test successful")
         else:
             print(f"❌ Webhook failed: {response.text}")
+            # This is expected for test data with fake channel ID
+            
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Webhook request failed: {e}")
+
+def test_webhook_without_channel():
+    """Test webhook without channel ID to see error handling"""
+    print("\n📨 Testing webhook without channel ID...")
+    
+    railway_url = os.getenv('RAILWAY_URL', 'https://web-production-f0220.up.railway.app')
+    if 'your-app' in railway_url:
+        railway_url = 'https://web-production-f0220.up.railway.app'
+    
+    # Test webhook without channel_id to test error handling
+    test_data = {
+        'latitude': 42.4184,
+        'longitude': -71.1062,
+        'user_id': '123456789',
+        # No channel_id
+        'selectedStore': {
+            'name': 'Target',
+            'address': '471 Salem St, Medford, MA 02155, USA',
+            'distance': 0.1,
+            'place_id': 'test_target'
+        },
+        'session_id': 'test_session_123'
+    }
+    
+    try:
+        response = requests.post(
+            f"{railway_url}/webhook/location",
+            json=test_data,
+            timeout=30
+        )
+        
+        print(f"Webhook (no channel) response: {response.status_code}")
+        
+        if response.status_code == 200:
+            print("✅ Webhook test successful (unexpected)")
+        else:
+            print(f"❌ Webhook failed as expected: {response.text}")
             
     except requests.exceptions.RequestException as e:
         print(f"❌ Webhook request failed: {e}")
@@ -141,10 +182,15 @@ def main():
     # Test 2: Store search
     test_store_search()
     
-    # Test 3: Webhook
+    # Test 3: Webhook (with fake channel ID - expected to fail)
     test_webhook()
     
+    # Test 4: Webhook without channel ID (to test error handling)
+    test_webhook_without_channel()
+    
     print("\n🎉 Test suite completed!")
+    print("\n📝 Note: Webhook tests are expected to fail with test data.")
+    print("   Real usage with actual Discord channel IDs will work properly.")
 
 if __name__ == "__main__":
     main() 
