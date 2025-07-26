@@ -3076,6 +3076,21 @@ def main():
         except Exception as e:
             handle_error(e, "Bot runtime")
     
+    # Start Flask server immediately in a separate thread
+    def start_flask():
+        safe_print("🌐 Starting Flask server immediately...")
+        try:
+            run_enhanced_flask()
+        except Exception as e:
+            handle_error(e, "Flask server error")
+    
+    flask_thread = threading.Thread(target=start_flask, daemon=True)
+    flask_thread.start()
+    
+    # Give Flask a moment to start
+    time.sleep(2)
+    safe_print("✅ Flask server started!")
+    
     # Start bot in separate thread
     bot_thread = threading.Thread(target=start_bot, daemon=True)
     bot_thread.start()
@@ -3092,14 +3107,16 @@ def main():
     
     if bot_connected:
         safe_print("✅ Discord bot connected!")
-        time.sleep(3)  # Reduced from 5 to 3 seconds
     else:
-        safe_print("⚠️ Bot not ready yet, but starting Flask anyway...")
+        safe_print("⚠️ Bot not ready yet, but Flask is running...")
     
+    # Keep the main thread alive
     try:
-        run_enhanced_flask()
-    except Exception as e:
-        handle_error(e, "Critical server error")
+        while True:
+            time.sleep(60)  # Sleep for 1 minute
+            safe_print("💓 Bot heartbeat...")
+    except KeyboardInterrupt:
+        safe_print("🛑 Shutting down...")
 
 @app.route('/test', methods=['GET'])
 def test_endpoint():
