@@ -1308,15 +1308,9 @@ async def location_command(interaction: discord.Interaction):
         # Get Railway URL using the new function
         railway_url = get_railway_url()
         
-        # Test if the URL is accessible (simple check)
-        try:
-            import requests
-            response = requests.head(railway_url, timeout=5)
-            if response.status_code != 200:
-                safe_print(f"⚠️ Railway URL returned status {response.status_code}, using fallback")
-                railway_url = 'https://web-production-f0220.up.railway.app'
-        except Exception as url_error:
-            safe_print(f"⚠️ Railway URL test failed: {url_error}, using fallback")
+        # Skip URL testing to avoid delays - use fallback directly if URL looks invalid
+        if not railway_url or '7e6a169e-4705-4ed6-bfbb-cf82d1bd056a' in railway_url:
+            safe_print(f"⚠️ Using fallback URL instead of: {railway_url}")
             railway_url = 'https://web-production-f0220.up.railway.app'
         
         # Generate session ID and URL
@@ -1388,17 +1382,28 @@ async def location_command(interaction: discord.Interaction):
             
             # If session is less than 30 seconds old, don't create a new one
             if session_age < 30:
-                await interaction.response.send_message(
-                    "⏳ You already have an active location session. Please wait a moment or use the existing link.",
-                    ephemeral=True
-                )
+                try:
+                    await interaction.response.send_message(
+                        "⏳ You already have an active location session. Please wait a moment or use the existing link.",
+                        ephemeral=True
+                    )
+                except discord.errors.InteractionResponded:
+                    await interaction.followup.send(
+                        "⏳ You already have an active location session. Please wait a moment or use the existing link.",
+                        ephemeral=True
+                    )
                 return
         
-        # Try to respond to interaction first (with shorter timeout)
+        # Try to respond to interaction first (with faster response)
         try:
-            message = await interaction.response.send_message(embed=embed, view=view, ephemeral=False)
+            # Defer the response immediately to prevent timeout
+            await interaction.response.defer(ephemeral=False)
+            
+            # Send the message as a followup
+            message = await interaction.followup.send(embed=embed, view=view)
             # Store the message ID for later deletion
             LOCATION_USER_INFO[user_key]['initial_message_id'] = message.id
+            
         except discord.errors.InteractionResponded:
             # Interaction already responded to
             safe_print("⚠️ Interaction already responded to")
