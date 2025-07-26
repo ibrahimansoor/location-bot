@@ -470,7 +470,8 @@ def search_stores_parallel(store_configs, location, radius_meters, max_stores_pe
                         if distance > max_distance_miles:
                             continue
                         
-                        # Get place details
+                        # Get place details with better address handling
+                        place_details = {}
                         try:
                             place_details = gmaps.place(
                                 place_id=place['place_id'],
@@ -478,11 +479,19 @@ def search_stores_parallel(store_configs, location, radius_meters, max_stores_pe
                             )['result']
                         except Exception as e:
                             safe_print(f"⚠️ Could not get details for {place.get('name', 'Unknown')}: {e}")
-                            place_details = {}
+                            # Use basic place data as fallback
+                            place_details = {
+                                'name': place.get('name'),
+                                'formatted_address': place.get('vicinity', 'Address not available')
+                            }
+                        
+                        # Construct address with debugging
+                        constructed_address = construct_address_from_place(place, place_details)
+                        safe_print(f"📍 Address for {place.get('name', 'Unknown')}: {constructed_address}")
                         
                         store_data = {
                             'name': place.get('name', store_config.chain),
-                            'address': place.get('formatted_address', 'Address not available'),
+                            'address': constructed_address,
                             'lat': place_lat,
                             'lng': place_lng,
                             'distance': distance,
@@ -995,6 +1004,33 @@ def format_phone_number(phone: str) -> str:
         return f"+1 ({digits[1:4]}) {digits[4:7]}-{digits[7:]}"
     else:
         return phone  # Return original if not standard US format
+
+def construct_address_from_place(place: dict, place_details: dict) -> str:
+    """Construct a proper address from available place data"""
+    # Try formatted_address from place details first
+    if place_details.get('formatted_address'):
+        return place_details['formatted_address']
+    
+    # Try vicinity from place data
+    if place.get('vicinity'):
+        return place['vicinity']
+    
+    # Try to construct from components
+    address_parts = []
+    
+    # Add street address if available
+    if place.get('name'):
+        address_parts.append(place['name'])
+    
+    # Add city/area if available
+    if place.get('vicinity'):
+        address_parts.append(place['vicinity'])
+    
+    # If we have any parts, join them
+    if address_parts:
+        return ', '.join(address_parts)
+    
+    return "Address not available"
 
 
 
