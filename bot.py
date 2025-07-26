@@ -639,7 +639,7 @@ def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 1
         
         # Remove duplicates and sort
         unique_stores = remove_duplicate_stores(all_stores)
-        unique_stores.sort(key=lambda x: (x['priority'], x['distance'], -x.get('quality_score', 0)))
+        unique_stores.sort(key=lambda x: (x.get('priority', 999), x['distance'], -x.get('quality_score', 0)))
         
         safe_print(f"✅ Found {len(unique_stores)} unique stores (from {len(all_stores)} total)")
         
@@ -716,7 +716,9 @@ def remove_duplicate_stores(stores: List[Dict]) -> List[Dict]:
             
             if distance_meters < 100:  # Within 100 meters
                 # Keep the one with better quality score
-                if store.get('quality_score', 0) <= existing_store.get('quality_score', 0):
+                current_quality = store.get('quality_score', 0)
+                existing_quality = existing_store.get('quality_score', 0)
+                if current_quality <= existing_quality:
                     is_duplicate = True
                     break
                 else:
@@ -2357,7 +2359,8 @@ def api_search_stores_enhanced():
                 "rating": 4.5,
                 "user_ratings_total": 100,
                 "place_id": "target_test",
-                "quality_score": 0.9
+                "quality_score": 0.9,
+                "priority": 1
             },
             {
                 "name": "BJ's Wholesale Club",
@@ -2372,7 +2375,8 @@ def api_search_stores_enhanced():
                 "rating": 4.0,
                 "user_ratings_total": 478,
                 "place_id": "bjs_test",
-                "quality_score": 0.8
+                "quality_score": 0.8,
+                "priority": 2
             },
             {
                 "name": "Best Buy",
@@ -2387,7 +2391,8 @@ def api_search_stores_enhanced():
                 "rating": 4.1,
                 "user_ratings_total": 3337,
                 "place_id": "bestbuy_test",
-                "quality_score": 0.85
+                "quality_score": 0.85,
+                "priority": 3
             }
         ]
         
