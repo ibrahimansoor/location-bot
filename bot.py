@@ -880,6 +880,27 @@ async def delete_initial_location_message(user_id: str, channel_id: str):
     except Exception as e:
         safe_print(f"❌ Error in delete_initial_location_message: {e}")
 
+def cleanup_old_sessions():
+    """Clean up old user sessions to prevent memory buildup"""
+    try:
+        current_time = discord.utils.utcnow()
+        keys_to_remove = []
+        
+        for user_key, user_info in LOCATION_USER_INFO.items():
+            session_age = (current_time - user_info['timestamp']).total_seconds()
+            # Remove sessions older than 1 hour
+            if session_age > 3600:
+                keys_to_remove.append(user_key)
+        
+        for key in keys_to_remove:
+            del LOCATION_USER_INFO[key]
+            safe_print(f"🧹 Cleaned up old session: {key}")
+        
+        if keys_to_remove:
+            safe_print(f"🧹 Cleaned up {len(keys_to_remove)} old sessions")
+    except Exception as e:
+        safe_print(f"❌ Error in cleanup_old_sessions: {e}")
+
 # Enhanced user management
 def check_user_permissions(user_id: str, required_role: str = 'user') -> bool:
     """Enhanced permission checking with role hierarchy"""
@@ -1046,6 +1067,7 @@ async def cleanup_task():
 async def cache_cleanup_task():
     """Cache cleanup task"""
     store_cache.clear_expired()
+    cleanup_old_sessions()  # Clean up old user sessions
 
 def get_enhanced_store_branding(chain: str, category: str, quality_score: float = 0) -> dict:
     """Enhanced store branding with quality-based colors"""
@@ -1358,6 +1380,19 @@ async def location_command(interaction: discord.Interaction):
             style=discord.ButtonStyle.secondary,
             url=website_url
         ))
+        
+        # Check if user already has an active session
+        if user_key in LOCATION_USER_INFO:
+            existing_session = LOCATION_USER_INFO[user_key]
+            session_age = (discord.utils.utcnow() - existing_session['timestamp']).total_seconds()
+            
+            # If session is less than 30 seconds old, don't create a new one
+            if session_age < 30:
+                await interaction.response.send_message(
+                    "⏳ You already have an active location session. Please wait a moment or use the existing link.",
+                    ephemeral=True
+                )
+                return
         
         # Try to respond to interaction first (with shorter timeout)
         try:
