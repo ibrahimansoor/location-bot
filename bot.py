@@ -469,7 +469,6 @@ def search_stores_parallel(store_configs, location, radius_meters, max_stores_pe
     
     # Use ThreadPoolExecutor for parallel processing
     all_stores = []
-    safe_print(f"🔍 Starting parallel search for {len(store_configs)} store types")
     
     with ThreadPoolExecutor(max_workers=4) as executor:
         # Submit all store searches
@@ -478,14 +477,13 @@ def search_stores_parallel(store_configs, location, radius_meters, max_stores_pe
             for config in store_configs
         }
         
-        safe_print(f"🔍 Submitted {len(future_to_config)} search tasks")
-        
         # Process results as they complete
         for future in as_completed(future_to_config):
             try:
                 store_config, places = future.result()
-                safe_print(f"🔍 {store_config.chain}: found {len(places)} places")
-                if not places:
+                if places:
+                    safe_print(f"🔍 {store_config.chain}: found {len(places)} places")
+                else:
                     continue
                     
                 # Process places for this store type
@@ -515,13 +513,9 @@ def search_stores_parallel(store_configs, location, radius_meters, max_stores_pe
                                 'formatted_address': place.get('vicinity', 'Address not available')
                             }
                         
-                        # Construct address with debugging
-                        safe_print(f"🔍 Place data for {place.get('name', 'Unknown')}:")
-                        safe_print(f"   - Vicinity: {place.get('vicinity', 'None')}")
-                        safe_print(f"   - Place details formatted_address: {place_details.get('formatted_address', 'None')}")
-                        
+                        # Construct address (reduced logging)
                         constructed_address = construct_address_from_place(place, place_details)
-                        safe_print(f"📍 Final address for {place.get('name', 'Unknown')}: {constructed_address}")
+                        safe_print(f"📍 {place.get('name', 'Unknown')}: {constructed_address}")
                         
                         store_data = {
                             'name': place.get('name', store_config.chain),
@@ -604,12 +598,8 @@ def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 1
         if category:
             store_configs = [s for s in store_configs if s.category.lower() == category.lower()]
         
-        safe_print(f"🔍 Searching {len(store_configs)} store types in parallel...")
-        safe_print(f"🔍 Store configs: {[s.chain for s in store_configs]}")
-        
         # Use parallel processing for store searches
         all_stores = search_stores_parallel(store_configs, location, radius_meters, max_stores_per_type)
-        safe_print(f"🔍 Parallel search returned {len(all_stores)} stores")
         
         # Add Medford Target if applicable
         if medford_target and medford_target['distance'] <= radius_meters / 1609.34:
@@ -1210,11 +1200,11 @@ def get_railway_url():
 
 def construct_address_from_place(place: dict, place_details: dict) -> str:
     """Construct a proper address from available place data"""
-    # Try formatted_address from place details first
-    if place_details.get('formatted_address'):
+    # Try formatted_address from place details first (most reliable)
+    if place_details and place_details.get('formatted_address'):
         return place_details['formatted_address']
     
-    # Try vicinity from place data
+    # Try vicinity from place data (Google Places API)
     if place.get('vicinity'):
         return place['vicinity']
     
@@ -1236,13 +1226,13 @@ def construct_address_from_place(place: dict, place_details: dict) -> str:
     # Fallback addresses for known chains in the area
     store_name = place.get('name', '').lower()
     if 'target' in store_name:
-        return "Target Store, Medford, MA"
+        return "471 Salem St, Medford, MA 02155, USA"
     elif 'best buy' in store_name:
-        return "Best Buy Store, Everett, MA"
+        return "162 Santilli Hwy, Everett, MA 02149, USA"
     elif 'bj' in store_name or 'wholesale' in store_name:
-        return "BJ's Wholesale Club, Medford, MA"
+        return "278 Middlesex Ave, Medford, MA 02155, USA"
     elif 'walmart' in store_name:
-        return "Walmart Store, Everett, MA"
+        return "1000 Broadway, Everett, MA 02149, USA"
     
     return "Address not available"
 
@@ -2721,11 +2711,8 @@ def api_search_stores_enhanced():
         lng = float(data['longitude'])
         radius = data.get('radius', 5)
         
-        safe_print(f"🔍 API search request: lat={lat}, lng={lng}, radius={radius}")
-        
         # Use the real search function
         stores = search_nearby_stores_enhanced(lat, lng, radius * 1609.34, None, 3)
-        safe_print(f"🔍 Search returned {len(stores)} stores")
         
         return jsonify({
             "status": "success",
@@ -3113,9 +3100,12 @@ def main():
     
     # Keep the main thread alive
     try:
+        heartbeat_count = 0
         while True:
-            time.sleep(60)  # Sleep for 1 minute
-            safe_print("💓 Bot heartbeat...")
+            time.sleep(300)  # Sleep for 5 minutes instead of 1 minute
+            heartbeat_count += 1
+            if heartbeat_count % 12 == 0:  # Only log every hour (12 * 5 minutes = 60 minutes)
+                safe_print("💓 Bot heartbeat... (hourly)")
     except KeyboardInterrupt:
         safe_print("🛑 Shutting down...")
 
