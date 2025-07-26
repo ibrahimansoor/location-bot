@@ -439,6 +439,8 @@ def search_stores_parallel(store_configs, location, radius_meters, max_stores_pe
     
     # Use ThreadPoolExecutor for parallel processing
     all_stores = []
+    safe_print(f"🔍 Starting parallel search for {len(store_configs)} store types")
+    
     with ThreadPoolExecutor(max_workers=4) as executor:
         # Submit all store searches
         future_to_config = {
@@ -446,10 +448,13 @@ def search_stores_parallel(store_configs, location, radius_meters, max_stores_pe
             for config in store_configs
         }
         
+        safe_print(f"🔍 Submitted {len(future_to_config)} search tasks")
+        
         # Process results as they complete
         for future in as_completed(future_to_config):
             try:
                 store_config, places = future.result()
+                safe_print(f"🔍 {store_config.chain}: found {len(places)} places")
                 if not places:
                     continue
                     
@@ -551,9 +556,11 @@ def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 1
             store_configs = [s for s in store_configs if s.category.lower() == category.lower()]
         
         safe_print(f"🔍 Searching {len(store_configs)} store types in parallel...")
+        safe_print(f"🔍 Store configs: {[s.chain for s in store_configs]}")
         
         # Use parallel processing for store searches
         all_stores = search_stores_parallel(store_configs, location, radius_meters, max_stores_per_type)
+        safe_print(f"🔍 Parallel search returned {len(all_stores)} stores")
         
         # Add Medford Target if applicable
         if medford_target and medford_target['distance'] <= radius_meters / 1609.34:
@@ -2310,6 +2317,17 @@ def api_search_stores_enhanced():
                 type='establishment'
             )
             safe_print(f"🧪 Google Maps test result: {len(test_result.get('results', []))} places found")
+            
+            # If no results, try without keyword
+            if not test_result.get('results'):
+                safe_print("🧪 Trying without keyword...")
+                test_result2 = gmaps.places_nearby(
+                    location=(lat, lng),
+                    radius=1000,
+                    type='establishment'
+                )
+                safe_print(f"🧪 Google Maps test result (no keyword): {len(test_result2.get('results', []))} places found")
+                
         except Exception as test_error:
             safe_print(f"❌ Google Maps API test failed: {test_error}")
             return jsonify({
