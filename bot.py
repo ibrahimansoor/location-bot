@@ -2302,8 +2302,12 @@ def api_search_stores_enhanced():
         
         # Perform the search
         safe_print(f"🔍 Starting search with gmaps={gmaps is not None}")
-        stores = search_nearby_stores_enhanced(lat, lng, radius * 1609.34, category, 3)
-        safe_print(f"🔍 Search completed: found {len(stores)} stores")
+        try:
+            stores = search_nearby_stores_enhanced(lat, lng, radius * 1609.34, category, 3)
+            safe_print(f"🔍 Search completed: found {len(stores)} stores")
+        except Exception as search_error:
+            safe_print(f"❌ Search error: {search_error}")
+            stores = []
         
         # Prepare response
         response_data = {
