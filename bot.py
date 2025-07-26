@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import pickle
 from collections import defaultdict
+import asyncio
 
 
 # Enhanced Flask app with rate limiting
@@ -917,16 +918,16 @@ def cleanup_old_sessions():
         if keys_to_remove:
             safe_print(f"🧹 Cleaned up {len(keys_to_remove)} old sessions")
             
-        # Also clean up stale locks (older than 5 minutes)
-        lock_keys_to_remove = []
-        for user_key in USER_LOCKS.keys():
+        # Clean up stale async locks
+        async_lock_keys_to_remove = []
+        for user_key in USER_ASYNC_LOCKS.keys():
             # If user has a lock but no session, remove the lock
             if user_key not in LOCATION_USER_INFO:
-                lock_keys_to_remove.append(user_key)
+                async_lock_keys_to_remove.append(user_key)
         
-        for key in lock_keys_to_remove:
-            del USER_LOCKS[key]
-            safe_print(f"🔓 Cleaned up stale lock: {key}")
+        for key in async_lock_keys_to_remove:
+            del USER_ASYNC_LOCKS[key]
+            safe_print(f"🔓 Cleaned up stale async lock: {key}")
             
     except Exception as e:
         safe_print(f"❌ Error in cleanup_old_sessions: {e}")
@@ -1033,6 +1034,7 @@ LOCATION_CHANNEL_ID = None
 LOCATION_USER_INFO = {}
 ACTIVE_SESSIONS = {}
 USER_LOCKS = {}  # Prevent duplicate embeds per user
+USER_ASYNC_LOCKS = {}  # Async locks for better concurrency control
 bot_ready = False
 bot_connected = False
 
@@ -1321,7 +1323,7 @@ async def ping_command(interaction: discord.Interaction):
 @bot.tree.command(name="location", description="Start simple location sharing")
 async def location_command(interaction: discord.Interaction):
     """Simple location sharing for store check-ins"""
-    global LOCATION_CHANNEL_ID, LOCATION_USER_INFO, USER_LOCKS
+    global LOCATION_CHANNEL_ID, LOCATION_USER_INFO, USER_ASYNC_LOCKS
     
     # Store interaction details for fallback
     channel = interaction.channel
@@ -1334,8 +1336,14 @@ async def location_command(interaction: discord.Interaction):
     except:
         pass  # Continue if already deferred
     
-    # Use lock to prevent duplicate embeds
-    if user_key in USER_LOCKS:
+    # Get or create async lock for this user
+    if user_key not in USER_ASYNC_LOCKS:
+        USER_ASYNC_LOCKS[user_key] = asyncio.Lock()
+    
+    user_lock = USER_ASYNC_LOCKS[user_key]
+    
+    # Try to acquire the lock
+    if user_lock.locked():
         try:
             await interaction.followup.send(
                 "⏳ Please wait, your location session is being set up...",
@@ -1345,156 +1353,149 @@ async def location_command(interaction: discord.Interaction):
             await channel.send(f"{user.mention} ⏳ Please wait, your location session is being set up...")
         return
     
-    # Set lock to prevent duplicates
-    USER_LOCKS[user_key] = True
-    
-    try:
-        # Check if user already has an active session
-        if user_key in LOCATION_USER_INFO:
-            existing_session = LOCATION_USER_INFO[user_key]
-            session_age = (discord.utils.utcnow() - existing_session['timestamp']).total_seconds()
-            
-            # If session is less than 30 seconds old, don't create a new one
-            if session_age < 30:
-                try:
-                    await interaction.followup.send(
-                        "⏳ You already have an active location session. Please wait a moment or use the existing link.",
-                        ephemeral=True
-                    )
-                except:
-                    await channel.send(f"{user.mention} ⏳ You already have an active location session. Please wait a moment or use the existing link.")
-                return
-        
-        # Generate session ID
-        session_id = str(uuid.uuid4())
-        
-        # Create embed with placeholder URL
-        embed = discord.Embed(
-            title="📍 Location Sharing",
-            description=f"**{interaction.user.display_name}** wants to share their location",
-            color=0x5865F2
-        )
-        
-        embed.add_field(
-            name="🔗 Location Portal",
-            value="🔄 Loading...",
-            inline=False
-        )
-        
-        embed.add_field(
-            name="ℹ️ How it works",
-            value="1. Click the link above\n2. Allow location access\n3. Select a store to check in\n4. Your check-in will be posted here",
-            inline=False
-        )
-        
-        embed.set_footer(text="Location Bot • Simple store check-ins")
-        embed.timestamp = discord.utils.utcnow()
-        
-        # Send initial message
+    # Acquire the lock
+    async with user_lock:
         try:
-            message = await interaction.followup.send(embed=embed)
-        except:
-            message = await channel.send(f"{user.mention}", embed=embed)
-        
-        # Store user info
-        LOCATION_CHANNEL_ID = interaction.channel.id
-        LOCATION_USER_INFO[user_key] = {
-            'user_id': interaction.user.id,
-            'username': interaction.user.display_name,
-            'full_username': str(interaction.user),
-            'avatar_url': interaction.user.display_avatar.url,
-            'timestamp': discord.utils.utcnow(),
-            'session_id': session_id,
-            'initial_message_id': message.id
-        }
-        
-        # Background setup
-        async def background_setup():
-            try:
-                # Check permissions
-                if not check_user_permissions(interaction.user.id, 'user'):
-                    await message.edit(content="❌ You don't have permission to use this command.")
+            # Double-check if user already has an active session
+            if user_key in LOCATION_USER_INFO:
+                existing_session = LOCATION_USER_INFO[user_key]
+                session_age = (discord.utils.utcnow() - existing_session['timestamp']).total_seconds()
+                
+                # If session is less than 30 seconds old, don't create a new one
+                if session_age < 30:
+                    try:
+                        await interaction.followup.send(
+                            "⏳ You already have an active location session. Please wait a moment or use the existing link.",
+                            ephemeral=True
+                        )
+                    except:
+                        await channel.send(f"{user.mention} ⏳ You already have an active location session. Please wait a moment or use the existing link.")
                     return
-                
-                # Get Railway URL - always use the working URL
-                railway_url = 'https://web-production-f0220.up.railway.app'
-                website_url = f"{railway_url}?session={session_id}&user={interaction.user.id}&channel={interaction.channel.id}"
-                
-                safe_print(f"🔗 Generated website URL: {website_url}")
-                
-                # Update embed with real URL
-                embed.set_field_at(0, name="🔗 Location Portal", value=f"[Click here to share your location]({website_url})", inline=False)
-                
-                # Add quick check-in buttons
-                view = discord.ui.View()
-                view.add_item(discord.ui.Button(
-                    label="🎯 Quick Target Check-in", 
-                    style=discord.ButtonStyle.danger,
-                    url=website_url
-                ))
-                view.add_item(discord.ui.Button(
-                    label="🏪 Quick Walmart Check-in", 
-                    style=discord.ButtonStyle.primary,
-                    url=website_url
-                ))
-                view.add_item(discord.ui.Button(
-                    label="🛒 Quick BJ's Check-in", 
-                    style=discord.ButtonStyle.success,
-                    url=website_url
-                ))
-                view.add_item(discord.ui.Button(
-                    label="🔌 Quick Best Buy Check-in", 
-                    style=discord.ButtonStyle.secondary,
-                    url=website_url
-                ))
-                
-                # Update the message
-                await message.edit(embed=embed, view=view)
-                
-                safe_print(f"🔗 Using Railway URL: {railway_url}")
-                
-                # Log analytics
-                log_analytics(
-                    interaction.user.id,
-                    "location_session_created",
-                    {
-                        "session_id": session_id,
-                        "railway_url": railway_url,
-                        "simplified": True
-                    },
-                    guild_id=interaction.guild.id if interaction.guild else None,
-                    session_id=session_id
-                )
-                
-            except Exception as bg_error:
-                safe_print(f"❌ Background setup error: {bg_error}")
-                try:
-                    await message.edit(content=f"❌ Error setting up location session: {str(bg_error)[:100]}")
-                except:
-                    safe_print(f"❌ Could not edit message: {bg_error}")
-            finally:
-                # Release lock after background task completes
-                if user_key in USER_LOCKS:
-                    del USER_LOCKS[user_key]
-        
-        # Start background task
-        asyncio.create_task(background_setup())
-        
-    except Exception as e:
-        error_id = handle_error(e, "Location command")
-        error_message = f"❌ Error creating location session (ID: {error_id})"
-        
-        try:
-            await interaction.followup.send(error_message, ephemeral=True)
-        except:
+            
+            # Generate session ID
+            session_id = str(uuid.uuid4())
+            
+            # Create embed with placeholder URL
+            embed = discord.Embed(
+                title="📍 Location Sharing",
+                description=f"**{interaction.user.display_name}** wants to share their location",
+                color=0x5865F2
+            )
+            
+            embed.add_field(
+                name="🔗 Location Portal",
+                value="🔄 Loading...",
+                inline=False
+            )
+            
+            embed.add_field(
+                name="ℹ️ How it works",
+                value="1. Click the link above\n2. Allow location access\n3. Select a store to check in\n4. Your check-in will be posted here",
+                inline=False
+            )
+            
+            embed.set_footer(text="Location Bot • Simple store check-ins")
+            embed.timestamp = discord.utils.utcnow()
+            
+            # Send initial message
             try:
-                await channel.send(f"{user.mention} {error_message}")
+                message = await interaction.followup.send(embed=embed)
             except:
-                safe_print(f"❌ Could not send error message to user: {error_message}")
-    finally:
-        # Release lock if there was an error
-        if user_key in USER_LOCKS:
-            del USER_LOCKS[user_key]
+                message = await channel.send(f"{user.mention}", embed=embed)
+            
+            # Store user info
+            LOCATION_CHANNEL_ID = interaction.channel.id
+            LOCATION_USER_INFO[user_key] = {
+                'user_id': interaction.user.id,
+                'username': interaction.user.display_name,
+                'full_username': str(interaction.user),
+                'avatar_url': interaction.user.display_avatar.url,
+                'timestamp': discord.utils.utcnow(),
+                'session_id': session_id,
+                'initial_message_id': message.id
+            }
+            
+            safe_print(f"✅ Created location session for user {user_key}")
+            
+            # Background setup
+            async def background_setup():
+                try:
+                    # Check permissions
+                    if not check_user_permissions(interaction.user.id, 'user'):
+                        await message.edit(content="❌ You don't have permission to use this command.")
+                        return
+                    
+                    # Get Railway URL - always use the working URL
+                    railway_url = 'https://web-production-f0220.up.railway.app'
+                    website_url = f"{railway_url}?session={session_id}&user={interaction.user.id}&channel={interaction.channel.id}"
+                    
+                    safe_print(f"🔗 Generated website URL: {website_url}")
+                    
+                    # Update embed with real URL
+                    embed.set_field_at(0, name="🔗 Location Portal", value=f"[Click here to share your location]({website_url})", inline=False)
+                    
+                    # Add quick check-in buttons
+                    view = discord.ui.View()
+                    view.add_item(discord.ui.Button(
+                        label="🎯 Quick Target Check-in", 
+                        style=discord.ButtonStyle.danger,
+                        url=website_url
+                    ))
+                    view.add_item(discord.ui.Button(
+                        label="🏪 Quick Walmart Check-in", 
+                        style=discord.ButtonStyle.primary,
+                        url=website_url
+                    ))
+                    view.add_item(discord.ui.Button(
+                        label="🛒 Quick BJ's Check-in", 
+                        style=discord.ButtonStyle.success,
+                        url=website_url
+                    ))
+                    view.add_item(discord.ui.Button(
+                        label="🔌 Quick Best Buy Check-in", 
+                        style=discord.ButtonStyle.secondary,
+                        url=website_url
+                    ))
+                    
+                    # Update the message
+                    await message.edit(embed=embed, view=view)
+                    
+                    safe_print(f"🔗 Using Railway URL: {railway_url}")
+                    
+                    # Log analytics
+                    log_analytics(
+                        interaction.user.id,
+                        "location_session_created",
+                        {
+                            "session_id": session_id,
+                            "railway_url": railway_url,
+                            "simplified": True
+                        },
+                        guild_id=interaction.guild.id if interaction.guild else None,
+                        session_id=session_id
+                    )
+                    
+                except Exception as bg_error:
+                    safe_print(f"❌ Background setup error: {bg_error}")
+                    try:
+                        await message.edit(content=f"❌ Error setting up location session: {str(bg_error)[:100]}")
+                    except:
+                        safe_print(f"❌ Could not edit message: {bg_error}")
+            
+            # Start background task
+            asyncio.create_task(background_setup())
+            
+        except Exception as e:
+            error_id = handle_error(e, "Location command")
+            error_message = f"❌ Error creating location session (ID: {error_id})"
+            
+            try:
+                await interaction.followup.send(error_message, ephemeral=True)
+            except:
+                try:
+                    await channel.send(f"{user.mention} {error_message}")
+                except:
+                    safe_print(f"❌ Could not send error message to user: {error_message}")
 
 @bot.tree.command(name="search", description="Search for specific store types near you")
 async def search_command(interaction: discord.Interaction, 
