@@ -45,6 +45,9 @@ intents.guilds = True
 intents.guild_messages = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
+# Add rate limit handling
+bot.http.rate_limit_delay = 1.0  # Add 1 second delay between requests
+
 # Google Maps client
 gmaps = None
 
@@ -1051,19 +1054,29 @@ async def on_ready():
         cleanup_task.start()
         cache_cleanup_task.start()
         
-        # Sync slash commands
-        synced = await bot.tree.sync()
-        safe_print(f"🔄 Synced {len(synced)} slash commands")
+        # Sync slash commands with rate limit handling
+        try:
+            safe_print("🔄 Syncing slash commands...")
+            synced = await bot.tree.sync()
+            safe_print(f"✅ Synced {len(synced)} slash commands")
+        except Exception as sync_error:
+            safe_print(f"⚠️ Slash command sync failed (rate limited?): {sync_error}")
+            # Continue anyway - commands will still work
         
         bot_ready = True
         safe_print("✅ Enhanced Location Bot is ready!")
         
-        # Set bot status
-        activity = discord.Activity(
-            type=discord.ActivityType.watching,
-            name=f"📍 {len(bot.guilds)} servers • /location"
-        )
-        await bot.change_presence(activity=activity)
+        # Set bot status with delay to avoid rate limiting
+        try:
+            await asyncio.sleep(2)  # Wait 2 seconds before setting status
+            activity = discord.Activity(
+                type=discord.ActivityType.watching,
+                name=f"📍 {len(bot.guilds)} servers • /location"
+            )
+            await bot.change_presence(activity=activity)
+            safe_print("✅ Bot status set successfully")
+        except Exception as status_error:
+            safe_print(f"⚠️ Failed to set bot status: {status_error}")
         
     except Exception as e:
         handle_error(e, "Bot startup")
@@ -3029,20 +3042,16 @@ def enhanced_health_check():
         }), 500
 
 def run_enhanced_flask():
-    """Run enhanced Flask server"""
+    """Run enhanced Flask server with production settings"""
     try:
-        port = int(os.getenv('PORT', 5000))
-        debug_mode = os.getenv('FLASK_ENV') == 'development'
-        safe_print(f"🌐 Starting enhanced Flask server on port {port}")
-        app.run(
-            host='0.0.0.0', 
-            port=port, 
-            debug=debug_mode, 
-            use_reloader=False, 
-            threaded=True
-        )
-    except Exception as e:
-        handle_error(e, "Flask startup")
+        # Use production WSGI server
+        from waitress import serve
+        safe_print("🌐 Starting enhanced Flask server with Waitress...")
+        serve(app, host=FLASK_HOST, port=FLASK_PORT, threads=4)
+    except ImportError:
+        # Fallback to development server if waitress not available
+        safe_print("🌐 Starting enhanced Flask server (development mode)...")
+        app.run(host=FLASK_HOST, port=FLASK_PORT, debug=FLASK_DEBUG, threaded=True)
 
 def main():
     """Simplified main function for Railway deployment"""
