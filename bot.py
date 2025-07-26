@@ -14,7 +14,7 @@ import time
 import sys
 import requests
 import googlemaps
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import sqlite3
 from contextlib import contextmanager
 import logging
@@ -84,7 +84,7 @@ logger = setup_enhanced_logging()
 
 def safe_print(msg):
     """Enhanced safe printing with logging"""
-    timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
     formatted_msg = f"[BOT] {timestamp} {msg}"
     try:
         print(formatted_msg)
@@ -520,8 +520,8 @@ def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 1
         medford_target = {
             "name": "Target",
             "address": "471 Salem St, Medford, MA 02155, USA",
-            "latitude": 42.4184,
-            "longitude": -71.1062,
+            "lat": 42.4184,
+            "lng": -71.1062,
             "distance": 0.1,
             "chain": "Target",
             "category": "Department",
@@ -640,10 +640,17 @@ def remove_duplicate_stores(stores: List[Dict]) -> List[Dict]:
         # Check for location duplicates (within 100 meters)
         is_duplicate = False
         for existing_store in unique_stores:
-            existing_lat = existing_store['lat']
-            existing_lng = existing_store['lng']
+            # Handle both 'lat'/'lng' and 'latitude'/'longitude' keys
+            existing_lat = existing_store.get('lat') or existing_store.get('latitude')
+            existing_lng = existing_store.get('lng') or existing_store.get('longitude')
+            current_lat = store.get('lat') or store.get('latitude')
+            current_lng = store.get('lng') or store.get('longitude')
+            
+            if not all([existing_lat, existing_lng, current_lat, current_lng]):
+                continue  # Skip if coordinates are missing
+                
             distance_meters = calculate_distance(
-                store['lat'], store['lng'], 
+                current_lat, current_lng, 
                 existing_lat, existing_lng
             ) * 1609.34  # Convert miles to meters
             
@@ -2304,7 +2311,7 @@ def api_search_stores_enhanced():
             "stores": stores,
             "total_found": len(stores),
             "search_location": {"lat": lat, "lng": lng, "radius": radius},
-            "search_timestamp": datetime.utcnow().isoformat()
+            "search_timestamp": datetime.now(timezone.utc).isoformat()
         }
         
         # Log analytics
@@ -2542,7 +2549,7 @@ def enhanced_health_check():
     try:
         health_status = {
             "status": "healthy",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "services": {
                 "discord_bot": {
                     "connected": bot_connected,
@@ -2596,7 +2603,7 @@ def enhanced_health_check():
         return jsonify({
             "status": "error",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }), 500
 
 def run_enhanced_flask():
@@ -2679,7 +2686,7 @@ def test_endpoint():
             "bot_ready": bot_ready,
             "google_maps_available": gmaps is not None,
             "location_channel_id": LOCATION_CHANNEL_ID,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
         safe_print(f"🧪 Test endpoint called: {status}")
@@ -2713,7 +2720,7 @@ def debug_endpoint():
             "bot_ready": bot_ready,
             "google_maps_available": gmaps is not None,
             "location_channel_id": LOCATION_CHANNEL_ID,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
         safe_print(f"🐛 Debug endpoint called: {debug_info}")
