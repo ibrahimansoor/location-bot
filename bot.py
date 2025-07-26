@@ -877,6 +877,24 @@ async def delete_initial_location_message(user_id: str, channel_id: str):
                 # Clean up user info
                 del LOCATION_USER_INFO[user_key]
                 safe_print(f"🧹 Cleaned up user info for {user_id}")
+            
+            # Also try to delete any recent messages from this user in the channel (cleanup duplicates)
+            try:
+                channel = bot.get_channel(int(channel_id))
+                if channel:
+                    # Look for recent messages from this user (last 5 minutes) that might be duplicates
+                    cutoff_time = discord.utils.utcnow() - timedelta(minutes=5)
+                    async for message in channel.history(limit=50, after=cutoff_time):
+                        if (message.author.id == bot.user.id and 
+                            "Location Sharing" in message.embeds[0].title if message.embeds else False):
+                            try:
+                                await message.delete()
+                                safe_print(f"🗑️ Deleted duplicate location message {message.id}")
+                            except:
+                                pass  # Ignore errors for cleanup messages
+            except Exception as cleanup_error:
+                safe_print(f"⚠️ Error during duplicate cleanup: {cleanup_error}")
+                
     except Exception as e:
         safe_print(f"❌ Error in delete_initial_location_message: {e}")
 
@@ -1323,18 +1341,6 @@ async def location_command(interaction: discord.Interaction):
         # Generate session ID first
         session_id = str(uuid.uuid4())
         
-        # Store user info immediately
-        LOCATION_CHANNEL_ID = interaction.channel.id
-        LOCATION_USER_INFO[user_key] = {
-            'user_id': interaction.user.id,
-            'username': interaction.user.display_name,
-            'full_username': str(interaction.user),
-            'avatar_url': interaction.user.display_avatar.url,
-            'timestamp': discord.utils.utcnow(),
-            'session_id': session_id,
-            'initial_message_id': None
-        }
-        
         # Create embed with placeholder URL (will be updated)
         embed = discord.Embed(
             title="📍 Location Sharing",
@@ -1360,14 +1366,29 @@ async def location_command(interaction: discord.Interaction):
         # Send initial message immediately
         try:
             message = await interaction.followup.send(embed=embed)
-            LOCATION_USER_INFO[user_key]['initial_message_id'] = message.id
         except:
             message = await channel.send(f"{user.mention}", embed=embed)
-            LOCATION_USER_INFO[user_key]['initial_message_id'] = message.id
+        
+        # Store user info AFTER sending message to avoid race conditions
+        LOCATION_CHANNEL_ID = interaction.channel.id
+        LOCATION_USER_INFO[user_key] = {
+            'user_id': interaction.user.id,
+            'username': interaction.user.display_name,
+            'full_username': str(interaction.user),
+            'avatar_url': interaction.user.display_avatar.url,
+            'timestamp': discord.utils.utcnow(),
+            'session_id': session_id,
+            'initial_message_id': message.id
+        }
         
         # NOW do the heavy work in background
         async def background_setup():
             try:
+                # Double-check that we still have the session (prevent race conditions)
+                if user_key not in LOCATION_USER_INFO:
+                    safe_print(f"⚠️ Session {user_key} no longer exists, skipping background setup")
+                    return
+                
                 # Check permissions
                 if not check_user_permissions(interaction.user.id, 'user'):
                     await message.edit(content="❌ You don't have permission to use this command.")
@@ -1406,7 +1427,7 @@ async def location_command(interaction: discord.Interaction):
                     url=website_url
                 ))
                 
-                # Update the message
+                # Update the message (not create a new one)
                 await message.edit(embed=embed, view=view)
                 
                 safe_print(f"🔗 Using Railway URL: {railway_url}")
@@ -1426,7 +1447,10 @@ async def location_command(interaction: discord.Interaction):
                 
             except Exception as bg_error:
                 safe_print(f"❌ Background setup error: {bg_error}")
-                await message.edit(content=f"❌ Error setting up location session: {str(bg_error)[:100]}")
+                try:
+                    await message.edit(content=f"❌ Error setting up location session: {str(bg_error)[:100]}")
+                except:
+                    safe_print(f"❌ Could not edit message: {bg_error}")
         
         # Start background task
         asyncio.create_task(background_setup())
