@@ -1317,9 +1317,28 @@ async def location_command(interaction: discord.Interaction):
         session_id = str(uuid.uuid4())
         website_url = f"{railway_url}?session={session_id}&user={interaction.user.id}&channel={interaction.channel.id}"
         
+        # Check if user already has an active session BEFORE creating a new one
+        user_key = f"{interaction.channel.id}_{interaction.user.id}"
+        if user_key in LOCATION_USER_INFO:
+            existing_session = LOCATION_USER_INFO[user_key]
+            session_age = (discord.utils.utcnow() - existing_session['timestamp']).total_seconds()
+            
+            # If session is less than 30 seconds old, don't create a new one
+            if session_age < 30:
+                try:
+                    await interaction.response.send_message(
+                        "⏳ You already have an active location session. Please wait a moment or use the existing link.",
+                        ephemeral=True
+                    )
+                except discord.errors.InteractionResponded:
+                    await interaction.followup.send(
+                        "⏳ You already have an active location session. Please wait a moment or use the existing link.",
+                        ephemeral=True
+                    )
+                return
+        
         # Store user info with message ID for later deletion
         LOCATION_CHANNEL_ID = interaction.channel.id
-        user_key = f"{interaction.channel.id}_{interaction.user.id}"
         LOCATION_USER_INFO[user_key] = {
             'user_id': interaction.user.id,
             'username': interaction.user.display_name,
@@ -1374,25 +1393,6 @@ async def location_command(interaction: discord.Interaction):
             style=discord.ButtonStyle.secondary,
             url=website_url
         ))
-        
-        # Check if user already has an active session
-        if user_key in LOCATION_USER_INFO:
-            existing_session = LOCATION_USER_INFO[user_key]
-            session_age = (discord.utils.utcnow() - existing_session['timestamp']).total_seconds()
-            
-            # If session is less than 30 seconds old, don't create a new one
-            if session_age < 30:
-                try:
-                    await interaction.response.send_message(
-                        "⏳ You already have an active location session. Please wait a moment or use the existing link.",
-                        ephemeral=True
-                    )
-                except discord.errors.InteractionResponded:
-                    await interaction.followup.send(
-                        "⏳ You already have an active location session. Please wait a moment or use the existing link.",
-                        ephemeral=True
-                    )
-                return
         
         # Try to respond to interaction first (with faster response)
         try:
