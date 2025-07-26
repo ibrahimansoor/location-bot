@@ -331,6 +331,22 @@ def init_enhanced_database():
             )
         ''')
         
+        # Last location cache table for quick check-ins
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS last_locations (
+                user_id TEXT PRIMARY KEY,
+                latitude REAL NOT NULL,
+                longitude REAL NOT NULL,
+                accuracy REAL,
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                store_preference TEXT DEFAULT 'all',
+                FOREIGN KEY (user_id) REFERENCES user_permissions(user_id)
+            )
+        ''')
+        
+        # Create index for last locations
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_last_location_user ON last_locations(user_id)')
+        
         # Session participants
         conn.execute('''
             CREATE TABLE IF NOT EXISTS session_participants (
@@ -796,6 +812,44 @@ def calculate_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> fl
         handle_error(e, "Distance calculation")
         return 999.0
 
+def save_last_location(user_id: str, lat: float, lng: float, accuracy: float = None):
+    """Save user's last known location for quick check-ins"""
+    try:
+        with db_pool.get_connection() as conn:
+            conn.execute('''
+                INSERT OR REPLACE INTO last_locations 
+                (user_id, latitude, longitude, accuracy, last_updated)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (user_id, lat, lng, accuracy))
+            conn.commit()
+            safe_print(f"💾 Saved last location for user {user_id}: {lat}, {lng}")
+    except Exception as e:
+        safe_print(f"❌ Error saving last location: {e}")
+
+def get_last_location(user_id: str) -> Optional[Dict]:
+    """Get user's last known location"""
+    try:
+        with db_pool.get_connection() as conn:
+            cursor = conn.execute('''
+                SELECT latitude, longitude, accuracy, last_updated, store_preference
+                FROM last_locations 
+                WHERE user_id = ?
+            ''', (user_id,))
+            result = cursor.fetchone()
+            
+            if result:
+                return {
+                    'latitude': result[0],
+                    'longitude': result[1],
+                    'accuracy': result[2],
+                    'last_updated': result[3],
+                    'store_preference': result[4]
+                }
+            return None
+    except Exception as e:
+        safe_print(f"❌ Error getting last location: {e}")
+        return None
+
 # Enhanced user management
 def check_user_permissions(user_id: str, required_role: str = 'user') -> bool:
     """Enhanced permission checking with role hierarchy"""
@@ -1232,13 +1286,40 @@ async def location_command(interaction: discord.Interaction):
         embed.set_footer(text="Location Bot • Simple store check-ins")
         embed.timestamp = discord.utils.utcnow()
         
+        # Add quick check-in buttons
+        view = discord.ui.View()
+        view.add_item(discord.ui.Button(
+            label="🎯 Quick Target Check-in", 
+            style=discord.ButtonStyle.danger,
+            custom_id="quick_target",
+            url=website_url
+        ))
+        view.add_item(discord.ui.Button(
+            label="🏪 Quick Walmart Check-in", 
+            style=discord.ButtonStyle.primary,
+            custom_id="quick_walmart",
+            url=website_url
+        ))
+        view.add_item(discord.ui.Button(
+            label="🛒 Quick BJ's Check-in", 
+            style=discord.ButtonStyle.success,
+            custom_id="quick_bjs",
+            url=website_url
+        ))
+        view.add_item(discord.ui.Button(
+            label="🔌 Quick Best Buy Check-in", 
+            style=discord.ButtonStyle.secondary,
+            custom_id="quick_bestbuy",
+            url=website_url
+        ))
+        
         # Try to respond to interaction first
         try:
-            await interaction.response.send_message(embed=embed)
+            await interaction.response.send_message(embed=embed, view=view)
         except Exception as interaction_error:
             # If interaction fails, send as regular channel message
             safe_print(f"⚠️ Interaction failed, sending channel message: {interaction_error}")
-            await channel.send(f"{user.mention}", embed=embed)
+            await channel.send(f"{user.mention}", embed=embed, view=view)
         
         safe_print(f"🔗 Using Railway URL: {railway_url}")
         
@@ -1649,6 +1730,97 @@ async def url_command(interaction: discord.Interaction):
     except Exception as e:
         error_id = handle_error(e, "URL command")
         await interaction.response.send_message(f"❌ Error getting URL info (ID: {error_id})", ephemeral=True)
+
+@bot.tree.command(name="quick", description="Quick check-in using your last known location")
+async def quick_command(interaction: discord.Interaction):
+    """Quick check-in using last known location for super-fast check-ins"""
+    try:
+        # Check permissions
+        if not check_user_permissions(interaction.user.id, 'user'):
+            await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
+            return
+        
+        # Get last known location
+        last_location = get_last_location(str(interaction.user.id))
+        
+        if not last_location:
+            await interaction.response.send_message(
+                "❌ No previous location found. Please use `/location` first to share your location.",
+                ephemeral=True
+            )
+            return
+        
+        # Check if location is recent (within 24 hours)
+        last_updated = datetime.fromisoformat(last_location['last_updated'].replace('Z', '+00:00'))
+        if datetime.now(timezone.utc) - last_updated > timedelta(hours=24):
+            await interaction.response.send_message(
+                "⚠️ Your last location is over 24 hours old. Please use `/location` to update your location.",
+                ephemeral=True
+            )
+            return
+        
+        # Search for stores near last location
+        stores = search_nearby_stores_enhanced(
+            last_location['latitude'], 
+            last_location['longitude'], 
+            12800,  # 8 miles
+            None, 
+            2
+        )
+        
+        if not stores:
+            await interaction.response.send_message(
+                "❌ No stores found near your last location. Please use `/location` to update your location.",
+                ephemeral=True
+            )
+            return
+        
+        # Create quick check-in embed
+        embed = discord.Embed(
+            title="⚡ Quick Check-in Available",
+            description=f"**{interaction.user.display_name}** can check in using their last known location",
+            color=0x00FF00
+        )
+        
+        # Show available stores
+        store_list = ""
+        for i, store in enumerate(stores[:4], 1):  # Show top 4 stores
+            distance = store.get('distance', 0)
+            store_list += f"{i}. **{store['name']}** - {distance:.1f} miles\n"
+            store_list += f"   📍 {store.get('address', 'Address not available')}\n\n"
+        
+        embed.add_field(name="🏪 Available Stores", value=store_list, inline=False)
+        embed.add_field(
+            name="📍 Last Location", 
+            value=f"Lat: {last_location['latitude']:.4f}, Lng: {last_location['longitude']:.4f}\nUpdated: {last_updated.strftime('%Y-%m-%d %H:%M')}",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="⚡ Quick Actions",
+            value="Use `/location` to update your location or check in to a specific store",
+            inline=False
+        )
+        
+        embed.set_footer(text="Location Bot • Quick Check-in")
+        embed.timestamp = discord.utils.utcnow()
+        
+        await interaction.response.send_message(embed=embed, ephemeral=False)
+        
+        # Log analytics
+        log_analytics(
+            interaction.user.id,
+            "quick_checkin_attempted",
+            {
+                "last_location_age_hours": (datetime.now(timezone.utc) - last_updated).total_seconds() / 3600,
+                "stores_found": len(stores)
+            },
+            guild_id=interaction.guild.id if interaction.guild else None
+        )
+        
+    except Exception as e:
+        error_id = handle_error(e, "Quick command")
+        await interaction.response.send_message(f"❌ Error with quick check-in (ID: {error_id})", ephemeral=True)
 
 # Enhanced Flask routes
 @app.route('/', methods=['GET'])
