@@ -396,6 +396,8 @@
     
     <script>
         const USER_INFO = {{ user_info_js | safe }};
+        let userLocation = null;
+        let nearbyStores = [];
         let currentTheme = localStorage.getItem('theme') || 'light';
         
         // Apply theme on load
@@ -436,6 +438,9 @@
         }
         
         function showUserLocation(latitude, longitude, accuracy) {
+            // Store user location globally
+            userLocation = { lat: latitude, lng: longitude, accuracy: accuracy };
+            
             const locationInfo = document.getElementById('locationInfo');
             const locationDetails = document.getElementById('locationDetails');
             const verifyLink = document.getElementById('verifyLink');
@@ -499,6 +504,9 @@
         }
         
         function displayStoresList(stores) {
+            // Store stores globally
+            nearbyStores = stores;
+            
             const storesContainer = document.getElementById('nearbyStores');
             console.log('Displaying stores list. Container found:', !!storesContainer);
             console.log('Number of stores to display:', stores.length);
@@ -531,7 +539,7 @@
                     const address = store.address || 'Address not available';
                     
                     html += `
-                        <div class="store-item" onclick="selectStore('${store.name}', '${address}', ${store.distance}, '${store.icon}')">
+                        <div class="store-item" onclick="selectStore('${store.place_id}')">
                             <div class="store-header">
                                 <span class="store-icon">${store.icon}</span>
                                 <span class="store-name">${store.name}</span>
@@ -551,49 +559,68 @@
             storesContainer.style.display = 'block';
         }
         
-        async function selectStore(storeName, storeAddress, distance, icon) {
-            if (!USER_INFO) {
-                showStatus('❌ Session information not available', 'error');
-                return;
+        async function selectStore(storeId) {
+            const store = nearbyStores.find(s => s.place_id === storeId);
+            if (!store || !userLocation) { 
+                showStatus('❌ Store or location not found. Please share your location first.', 'error'); 
+                return; 
             }
             
-            showStatus('📤 Posting to Discord...', 'info');
-            
+            showStatus(`📍 Checking in to ${store.name}...`, 'info');
             try {
-                const checkInData = {
-                    user_id: USER_INFO.user_id,
-                    session_id: USER_INFO.session_id,
-                    channel_id: USER_INFO.channel_id,
-                    store_name: storeName,
-                    store_address: storeAddress,
-                    distance: distance,
-                    icon: icon,
-                    timestamp: new Date().toISOString()
+                const checkInData = { 
+                    latitude: userLocation.lat, 
+                    longitude: userLocation.lng, 
+                    accuracy: userLocation.accuracy || 10, 
+                    isManualCheckIn: true, 
+                    selectedStore: {
+                        name: store.name,
+                        address: store.address,
+                        lat: store.lat,
+                        lng: store.lng,
+                        distance: store.distance,
+                        chain: store.chain,
+                        category: store.category,
+                        icon: store.icon,
+                        phone: store.phone,
+                        rating: store.rating,
+                        place_id: store.place_id,
+                        quality_score: store.quality_score
+                    }, 
+                    user_id: USER_INFO?.user_id || 'unknown',
+                    session_id: USER_INFO?.session_id || 'web_session',
+                    channel_id: USER_INFO?.channel_id || 'default'
                 };
                 
-                console.log('Check-in data:', checkInData);
-                
-                const response = await fetch('/webhook/location', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(checkInData)
+                console.log('Sending check-in data:', checkInData);
+                const response = await fetch('/webhook/location', { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' }, 
+                    body: JSON.stringify(checkInData) 
                 });
-                
                 const responseData = await response.json();
                 console.log('Check-in response:', responseData);
                 
-                if (response.ok && responseData.status === 'success') {
-                    // Show success screen
-                    document.getElementById('nearbyStores').style.display = 'none';
-                    document.getElementById('locationInfo').style.display = 'none';
-                    document.getElementById('successScreen').style.display = 'block';
-                    showStatus('✅ Check-in successful! Posted to Discord.', 'success');
+                if (response.ok) {
+                    showStatus(`✅ Checked in to ${store.name}! Posted to Discord.`, 'success');
+                    // Hide the store list after successful check-in
+                    const storesContainer = document.getElementById('nearbyStores');
+                    if (storesContainer) {
+                        storesContainer.innerHTML = `
+                            <div style="text-align: center; padding: 40px; background: rgba(255,255,255,0.1); border-radius: 12px; margin: 20px 0;">
+                                <div style="font-size: 48px; margin-bottom: 16px;">✅</div>
+                                <h3>Check-in Complete!</h3>
+                                <p>Successfully checked in to ${store.name}</p>
+                                <p>Your check-in has been posted to Discord.</p>
+                            </div>
+                        `;
+                    }
                 } else {
-                    showStatus('❌ Failed to post to Discord', 'error');
+                    showStatus(`❌ Failed to check in: ${responseData.error || 'Unknown error'}`, 'error');
                 }
             } catch (error) {
                 console.error('Check-in error:', error);
-                showStatus('❌ Error posting to Discord', 'error');
+                showStatus('❌ Check-in failed: ' + error.message, 'error');
             }
         }
         
