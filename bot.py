@@ -2383,6 +2383,7 @@ def api_search_stores_enhanced():
                 }
             ]
             
+            safe_print(f"🎯 Returning {len(test_stores)} test stores for Medford area")
             return jsonify({
                 "status": "success",
                 "stores": test_stores,
