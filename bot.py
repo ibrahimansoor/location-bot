@@ -1296,27 +1296,13 @@ async def location_command(interaction: discord.Interaction):
     channel = interaction.channel
     user = interaction.user
     
+    # IMMEDIATE RESPONSE - Defer first to prevent timeout
     try:
-        # Check permissions first
-        if not check_user_permissions(interaction.user.id, 'user'):
-            try:
-                await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
-            except:
-                await channel.send(f"{user.mention} ❌ You don't have permission to use this command.")
-            return
-        
-        # Get Railway URL using the new function
-        railway_url = get_railway_url()
-        
-        # Skip URL testing to avoid delays - use fallback directly if URL looks invalid
-        if not railway_url or '7e6a169e-4705-4ed6-bfbb-cf82d1bd056a' in railway_url:
-            safe_print(f"⚠️ Using fallback URL instead of: {railway_url}")
-            railway_url = 'https://web-production-f0220.up.railway.app'
-        
-        # Generate session ID and URL
-        session_id = str(uuid.uuid4())
-        website_url = f"{railway_url}?session={session_id}&user={interaction.user.id}&channel={interaction.channel.id}"
-        
+        await interaction.response.defer(ephemeral=False)
+    except:
+        pass  # Continue if already deferred
+    
+    try:
         # Check if user already has an active session BEFORE creating a new one
         user_key = f"{interaction.channel.id}_{interaction.user.id}"
         if user_key in LOCATION_USER_INFO:
@@ -1326,18 +1312,18 @@ async def location_command(interaction: discord.Interaction):
             # If session is less than 30 seconds old, don't create a new one
             if session_age < 30:
                 try:
-                    await interaction.response.send_message(
-                        "⏳ You already have an active location session. Please wait a moment or use the existing link.",
-                        ephemeral=True
-                    )
-                except discord.errors.InteractionResponded:
                     await interaction.followup.send(
                         "⏳ You already have an active location session. Please wait a moment or use the existing link.",
                         ephemeral=True
                     )
+                except:
+                    await channel.send(f"{user.mention} ⏳ You already have an active location session. Please wait a moment or use the existing link.")
                 return
         
-        # Store user info with message ID for later deletion
+        # Generate session ID first
+        session_id = str(uuid.uuid4())
+        
+        # Store user info immediately
         LOCATION_CHANNEL_ID = interaction.channel.id
         LOCATION_USER_INFO[user_key] = {
             'user_id': interaction.user.id,
@@ -1346,10 +1332,10 @@ async def location_command(interaction: discord.Interaction):
             'avatar_url': interaction.user.display_avatar.url,
             'timestamp': discord.utils.utcnow(),
             'session_id': session_id,
-            'initial_message_id': None  # Will be set after sending the message
+            'initial_message_id': None
         }
         
-        # Create embed
+        # Create embed with placeholder URL (will be updated)
         embed = discord.Embed(
             title="📍 Location Sharing",
             description=f"**{interaction.user.display_name}** wants to share their location",
@@ -1358,7 +1344,7 @@ async def location_command(interaction: discord.Interaction):
         
         embed.add_field(
             name="🔗 Location Portal",
-            value=f"[Click here to share your location]({website_url})",
+            value="🔄 Loading...",
             inline=False
         )
         
@@ -1371,90 +1357,91 @@ async def location_command(interaction: discord.Interaction):
         embed.set_footer(text="Location Bot • Simple store check-ins")
         embed.timestamp = discord.utils.utcnow()
         
-        # Add quick check-in buttons (URL buttons only - no custom_id)
-        view = discord.ui.View()
-        view.add_item(discord.ui.Button(
-            label="🎯 Quick Target Check-in", 
-            style=discord.ButtonStyle.danger,
-            url=website_url
-        ))
-        view.add_item(discord.ui.Button(
-            label="🏪 Quick Walmart Check-in", 
-            style=discord.ButtonStyle.primary,
-            url=website_url
-        ))
-        view.add_item(discord.ui.Button(
-            label="🛒 Quick BJ's Check-in", 
-            style=discord.ButtonStyle.success,
-            url=website_url
-        ))
-        view.add_item(discord.ui.Button(
-            label="🔌 Quick Best Buy Check-in", 
-            style=discord.ButtonStyle.secondary,
-            url=website_url
-        ))
-        
-        # Try to respond to interaction first (with faster response)
+        # Send initial message immediately
         try:
-            # Defer the response immediately to prevent timeout
-            await interaction.response.defer(ephemeral=False)
-            
-            # Send the message as a followup
-            message = await interaction.followup.send(embed=embed, view=view)
-            # Store the message ID for later deletion
+            message = await interaction.followup.send(embed=embed)
             LOCATION_USER_INFO[user_key]['initial_message_id'] = message.id
-            
-        except discord.errors.InteractionResponded:
-            # Interaction already responded to
-            safe_print("⚠️ Interaction already responded to")
-            message = await channel.send(f"{user.mention}", embed=embed, view=view)
-            LOCATION_USER_INFO[user_key]['initial_message_id'] = message.id
-        except Exception as interaction_error:
-            # If interaction fails, send as regular channel message
-            safe_print(f"⚠️ Interaction failed, sending channel message: {interaction_error}")
-            message = await channel.send(f"{user.mention}", embed=embed, view=view)
+        except:
+            message = await channel.send(f"{user.mention}", embed=embed)
             LOCATION_USER_INFO[user_key]['initial_message_id'] = message.id
         
-        safe_print(f"🔗 Using Railway URL: {railway_url}")
+        # NOW do the heavy work in background
+        async def background_setup():
+            try:
+                # Check permissions
+                if not check_user_permissions(interaction.user.id, 'user'):
+                    await message.edit(content="❌ You don't have permission to use this command.")
+                    return
+                
+                # Get Railway URL
+                railway_url = get_railway_url()
+                if not railway_url or '7e6a169e-4705-4ed6-bfbb-cf82d1bd056a' in railway_url:
+                    railway_url = 'https://web-production-f0220.up.railway.app'
+                
+                website_url = f"{railway_url}?session={session_id}&user={interaction.user.id}&channel={interaction.channel.id}"
+                
+                # Update embed with real URL
+                embed.set_field_at(0, name="🔗 Location Portal", value=f"[Click here to share your location]({website_url})", inline=False)
+                
+                # Add quick check-in buttons
+                view = discord.ui.View()
+                view.add_item(discord.ui.Button(
+                    label="🎯 Quick Target Check-in", 
+                    style=discord.ButtonStyle.danger,
+                    url=website_url
+                ))
+                view.add_item(discord.ui.Button(
+                    label="🏪 Quick Walmart Check-in", 
+                    style=discord.ButtonStyle.primary,
+                    url=website_url
+                ))
+                view.add_item(discord.ui.Button(
+                    label="🛒 Quick BJ's Check-in", 
+                    style=discord.ButtonStyle.success,
+                    url=website_url
+                ))
+                view.add_item(discord.ui.Button(
+                    label="🔌 Quick Best Buy Check-in", 
+                    style=discord.ButtonStyle.secondary,
+                    url=website_url
+                ))
+                
+                # Update the message
+                await message.edit(embed=embed, view=view)
+                
+                safe_print(f"🔗 Using Railway URL: {railway_url}")
+                
+                # Log analytics
+                log_analytics(
+                    interaction.user.id,
+                    "location_session_created",
+                    {
+                        "session_id": session_id,
+                        "railway_url": railway_url,
+                        "simplified": True
+                    },
+                    guild_id=interaction.guild.id if interaction.guild else None,
+                    session_id=session_id
+                )
+                
+            except Exception as bg_error:
+                safe_print(f"❌ Background setup error: {bg_error}")
+                await message.edit(content=f"❌ Error setting up location session: {str(bg_error)[:100]}")
         
-        # Log analytics in background
-        log_analytics(
-            interaction.user.id,
-            "location_session_created",
-            {
-                "session_id": session_id,
-                "railway_url": railway_url,
-                "simplified": True
-            },
-            guild_id=interaction.guild.id if interaction.guild else None,
-            session_id=session_id
-        )
+        # Start background task
+        asyncio.create_task(background_setup())
         
     except Exception as e:
         error_id = handle_error(e, "Location command")
         error_message = f"❌ Error creating location session (ID: {error_id})"
         
-        # Try multiple ways to send error message
         try:
-            # First try to respond to the interaction
-            await interaction.response.send_message(error_message, ephemeral=True)
-        except discord.errors.InteractionResponded:
-            # If interaction already responded, try followup
-            try:
-                await interaction.followup.send(error_message, ephemeral=True)
-            except:
-                # If followup fails, send as channel message
-                try:
-                    await channel.send(f"{user.mention} {error_message}")
-                except:
-                    safe_print(f"❌ Could not send error message to user: {error_message}")
-        except Exception as response_error:
-            # If any other error, try channel message
+            await interaction.followup.send(error_message, ephemeral=True)
+        except:
             try:
                 await channel.send(f"{user.mention} {error_message}")
             except:
                 safe_print(f"❌ Could not send error message to user: {error_message}")
-                safe_print(f"❌ Response error: {response_error}")
 
 @bot.tree.command(name="search", description="Search for specific store types near you")
 async def search_command(interaction: discord.Interaction, 
