@@ -1436,12 +1436,25 @@ async def location_command(interaction: discord.Interaction):
         
         # Try multiple ways to send error message
         try:
+            # First try to respond to the interaction
             await interaction.response.send_message(error_message, ephemeral=True)
-        except:
+        except discord.errors.InteractionResponded:
+            # If interaction already responded, try followup
+            try:
+                await interaction.followup.send(error_message, ephemeral=True)
+            except:
+                # If followup fails, send as channel message
+                try:
+                    await channel.send(f"{user.mention} {error_message}")
+                except:
+                    safe_print(f"❌ Could not send error message to user: {error_message}")
+        except Exception as response_error:
+            # If any other error, try channel message
             try:
                 await channel.send(f"{user.mention} {error_message}")
             except:
                 safe_print(f"❌ Could not send error message to user: {error_message}")
+                safe_print(f"❌ Response error: {response_error}")
 
 @bot.tree.command(name="search", description="Search for specific store types near you")
 async def search_command(interaction: discord.Interaction, 
