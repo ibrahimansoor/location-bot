@@ -850,6 +850,36 @@ def get_last_location(user_id: str) -> Optional[Dict]:
         safe_print(f"❌ Error getting last location: {e}")
         return None
 
+async def delete_initial_location_message(user_id: str, channel_id: str):
+    """Delete the initial location message after check-in"""
+    try:
+        user_key = f"{channel_id}_{user_id}"
+        if user_key in LOCATION_USER_INFO:
+            user_info = LOCATION_USER_INFO[user_key]
+            message_id = user_info.get('initial_message_id')
+            
+            if message_id:
+                # Get the channel
+                channel = bot.get_channel(int(channel_id))
+                if channel:
+                    try:
+                        # Try to delete the message
+                        message = await channel.fetch_message(message_id)
+                        await message.delete()
+                        safe_print(f"🗑️ Deleted initial message {message_id} for user {user_id}")
+                    except discord.NotFound:
+                        safe_print(f"⚠️ Message {message_id} not found for user {user_id}")
+                    except discord.Forbidden:
+                        safe_print(f"⚠️ Cannot delete message {message_id} for user {user_id} - no permissions")
+                    except Exception as e:
+                        safe_print(f"❌ Error deleting message {message_id}: {e}")
+                
+                # Clean up user info
+                del LOCATION_USER_INFO[user_key]
+                safe_print(f"🧹 Cleaned up user info for {user_id}")
+    except Exception as e:
+        safe_print(f"❌ Error in delete_initial_location_message: {e}")
+
 # Enhanced user management
 def check_user_permissions(user_id: str, required_role: str = 'user') -> bool:
     """Enhanced permission checking with role hierarchy"""
@@ -1271,7 +1301,7 @@ async def location_command(interaction: discord.Interaction):
         session_id = str(uuid.uuid4())
         website_url = f"{railway_url}?session={session_id}&user={interaction.user.id}&channel={interaction.channel.id}"
         
-        # Store user info
+        # Store user info with message ID for later deletion
         LOCATION_CHANNEL_ID = interaction.channel.id
         user_key = f"{interaction.channel.id}_{interaction.user.id}"
         LOCATION_USER_INFO[user_key] = {
@@ -1280,7 +1310,8 @@ async def location_command(interaction: discord.Interaction):
             'full_username': str(interaction.user),
             'avatar_url': interaction.user.display_avatar.url,
             'timestamp': discord.utils.utcnow(),
-            'session_id': session_id
+            'session_id': session_id,
+            'initial_message_id': None  # Will be set after sending the message
         }
         
         # Create embed
@@ -1330,15 +1361,19 @@ async def location_command(interaction: discord.Interaction):
         
         # Try to respond to interaction first (with shorter timeout)
         try:
-            await interaction.response.send_message(embed=embed, view=view, ephemeral=False)
+            message = await interaction.response.send_message(embed=embed, view=view, ephemeral=False)
+            # Store the message ID for later deletion
+            LOCATION_USER_INFO[user_key]['initial_message_id'] = message.id
         except discord.errors.InteractionResponded:
             # Interaction already responded to
             safe_print("⚠️ Interaction already responded to")
-            await channel.send(f"{user.mention}", embed=embed, view=view)
+            message = await channel.send(f"{user.mention}", embed=embed, view=view)
+            LOCATION_USER_INFO[user_key]['initial_message_id'] = message.id
         except Exception as interaction_error:
             # If interaction fails, send as regular channel message
             safe_print(f"⚠️ Interaction failed, sending channel message: {interaction_error}")
-            await channel.send(f"{user.mention}", embed=embed, view=view)
+            message = await channel.send(f"{user.mention}", embed=embed, view=view)
+            LOCATION_USER_INFO[user_key]['initial_message_id'] = message.id
         
         safe_print(f"🔗 Using Railway URL: {railway_url}")
         
@@ -2682,6 +2717,18 @@ def simplified_location_webhook():
             result = future.result(timeout=20)
             if result:
                 safe_print("✅ Successfully posted to Discord")
+                
+                # Delete the initial location message
+                if bot.loop and not bot.loop.is_closed():
+                    delete_future = asyncio.run_coroutine_threadsafe(
+                        delete_initial_location_message(user_id, channel_id),
+                        bot.loop
+                    )
+                    try:
+                        delete_future.result(timeout=10)
+                    except Exception as delete_error:
+                        safe_print(f"⚠️ Error deleting initial message: {delete_error}")
+                
                 log_analytics(
                     user_id,
                     "simplified_location_shared",
