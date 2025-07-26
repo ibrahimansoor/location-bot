@@ -2300,6 +2300,25 @@ def api_search_stores_enhanced():
                 "total_found": 0
             }), 503
         
+        # Test Google Maps API
+        try:
+            safe_print("🧪 Testing Google Maps API...")
+            test_result = gmaps.places_nearby(
+                location=(lat, lng),
+                radius=1000,  # 1km radius
+                keyword="Target",
+                type='establishment'
+            )
+            safe_print(f"🧪 Google Maps test result: {len(test_result.get('results', []))} places found")
+        except Exception as test_error:
+            safe_print(f"❌ Google Maps API test failed: {test_error}")
+            return jsonify({
+                "error": f"Google Maps API test failed: {test_error}",
+                "status": "error",
+                "stores": [],
+                "total_found": 0
+            }), 503
+        
         # Perform the search
         safe_print(f"🔍 Starting search with gmaps={gmaps is not None}")
         try:
