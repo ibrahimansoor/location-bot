@@ -539,12 +539,18 @@ def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 1
     medford_target = None
     if 42.40 <= lat <= 42.45 and -71.15 <= lng <= -71.05:
         safe_print(f"🎯 User is in Medford area! Adding Medford Target")
+        # Calculate real distance from user's location
+        medford_target_lat = 42.4184
+        medford_target_lng = -71.1062
+        real_distance = calculate_distance(lat, lng, medford_target_lat, medford_target_lng)
+        safe_print(f"🎯 Calculated distance to Medford Target: {real_distance:.2f} miles")
+        
         medford_target = {
             "name": "Target",
             "address": "471 Salem St, Medford, MA 02155, USA",
-            "lat": 42.4184,
-            "lng": -71.1062,
-            "distance": 0.1,
+            "lat": medford_target_lat,
+            "lng": medford_target_lng,
+            "distance": real_distance,
             "chain": "Target",
             "category": "Department",
             "icon": "🎯",
@@ -592,14 +598,26 @@ def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 1
         
         # If no stores found, add some fallback stores for testing
         if not all_stores:
-            safe_print("⚠️ No stores found from API, adding fallback stores")
+            safe_print("⚠️ No stores found from API, adding fallback stores with real distances")
+            
+            # Calculate real distances for fallback stores
+            target_lat, target_lng = 42.4184, -71.1062
+            bjs_lat, bjs_lng = 42.413148, -71.082149
+            bestbuy_lat, bestbuy_lng = 42.403403, -71.06815
+            
+            target_distance = calculate_distance(lat, lng, target_lat, target_lng)
+            bjs_distance = calculate_distance(lat, lng, bjs_lat, bjs_lng)
+            bestbuy_distance = calculate_distance(lat, lng, bestbuy_lat, bestbuy_lng)
+            
+            safe_print(f"📍 Calculated distances - Target: {target_distance:.2f}mi, BJ's: {bjs_distance:.2f}mi, Best Buy: {bestbuy_distance:.2f}mi")
+            
             fallback_stores = [
                 {
                     "name": "Target",
                     "address": "471 Salem St, Medford, MA 02155, USA",
-                    "lat": 42.4184,
-                    "lng": -71.1062,
-                    "distance": 0.1,
+                    "lat": target_lat,
+                    "lng": target_lng,
+                    "distance": target_distance,
                     "chain": "Target",
                     "category": "Department",
                     "icon": "🎯",
@@ -612,9 +630,9 @@ def search_nearby_stores_enhanced(lat: float, lng: float, radius_meters: int = 1
                 {
                     "name": "BJ's Wholesale Club",
                     "address": "278 Middlesex Ave, Medford, MA 02155, USA",
-                    "lat": 42.413148,
-                    "lng": -71.082149,
-                    "distance": 1.3,
+                    "lat": bjs_lat,
+                    "lng": bjs_lng,
+                    "distance": bjs_distance,
                     "chain": "BJ's Wholesale Club",
                     "category": "Wholesale",
                     "icon": "🛒",
