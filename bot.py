@@ -1416,12 +1416,11 @@ async def location_command(interaction: discord.Interaction):
                     await message.edit(content="❌ You don't have permission to use this command.")
                     return
                 
-                # Get Railway URL
-                railway_url = get_railway_url()
-                if not railway_url or '7e6a169e-4705-4ed6-bfbb-cf82d1bd056a' in railway_url:
-                    railway_url = 'https://web-production-f0220.up.railway.app'
-                
+                # Get Railway URL - always use the working URL
+                railway_url = 'https://web-production-f0220.up.railway.app'
                 website_url = f"{railway_url}?session={session_id}&user={interaction.user.id}&channel={interaction.channel.id}"
+                
+                safe_print(f"🔗 Generated website URL: {website_url}")
                 
                 # Update embed with real URL
                 embed.set_field_at(0, name="🔗 Location Portal", value=f"[Click here to share your location]({website_url})", inline=False)
@@ -3164,7 +3163,24 @@ def simple_debug():
         "bot_ready": bot_ready,
         "timestamp": datetime.now().isoformat(),
         "stores": len(get_comprehensive_store_database()),
-        "railway_url": get_railway_url()
+        "railway_url": get_railway_url(),
+        "working_url": "https://web-production-f0220.up.railway.app"
+    })
+
+@app.route('/test-portal', methods=['GET'])
+def test_portal():
+    """Test if the web portal is working"""
+    session_id = request.args.get('session', 'test')
+    user_id = request.args.get('user', 'test')
+    channel_id = request.args.get('channel', 'test')
+    
+    return jsonify({
+        "status": "portal_working",
+        "session_id": session_id,
+        "user_id": user_id,
+        "channel_id": channel_id,
+        "timestamp": datetime.now().isoformat(),
+        "message": "Web portal is working correctly!"
     })
 
 if __name__ == "__main__":
