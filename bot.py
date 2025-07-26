@@ -377,6 +377,10 @@ def initialize_google_maps():
         safe_print("⚠️ GOOGLE_MAPS_API_KEY not found - real-time search disabled")
         return False
     
+    # Initialize weather API key
+    global WEATHER_API_KEY
+    WEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY')
+    
     try:
         gmaps = googlemaps.Client(key=api_key)
         
@@ -1009,6 +1013,21 @@ def format_phone_number(phone: str) -> str:
     else:
         return phone  # Return original if not standard US format
 
+def get_railway_url():
+    """Get Railway URL with proper fallback logic"""
+    # Priority 1: RAILWAY_STATIC_URL
+    railway_static = os.getenv('RAILWAY_STATIC_URL')
+    if railway_static and railway_static.startswith('http'):
+        return railway_static
+    
+    # Priority 2: RAILWAY_URL (if valid)
+    railway_url = os.getenv('RAILWAY_URL')
+    if railway_url and railway_url.startswith('http') and 'your-app' not in railway_url:
+        return railway_url
+    
+    # Priority 3: Fallback
+    return 'https://web-production-f0220.up.railway.app'
+
 def construct_address_from_place(place: dict, place_details: dict) -> str:
     """Construct a proper address from available place data"""
     # Try formatted_address from place details first
@@ -1139,20 +1158,8 @@ async def location_command(interaction: discord.Interaction):
                 await channel.send(f"{user.mention} ❌ You don't have permission to use this command.")
             return
         
-        # Get Railway URL with correct priority
-        railway_url = os.getenv('RAILWAY_STATIC_URL')  # This has the correct URL
-        if not railway_url:
-            railway_url = os.getenv('RAILWAY_URL') or os.getenv('PORT') or 'https://web-production-f0220.up.railway.app'
-        
-        # Ensure URL has https:// prefix
-        if railway_url and not railway_url.startswith('http'):
-            railway_url = f"https://{railway_url}"
-        
-        # If still no URL, try to construct from Railway's environment
-        if not railway_url or 'your-app' in railway_url:
-            railway_project_name = os.getenv('RAILWAY_PROJECT_NAME', 'web-production')
-            railway_service_name = os.getenv('RAILWAY_SERVICE_NAME', 'f0220')
-            railway_url = f"https://{railway_project_name}-{railway_service_name}.up.railway.app"
+        # Get Railway URL using the new function
+        railway_url = get_railway_url()
         
         # Generate session ID and URL
         session_id = str(uuid.uuid4())
@@ -1253,20 +1260,8 @@ async def search_command(interaction: discord.Interaction,
                 await channel.send(f"{user.mention} ❌ Radius must be between 1 and 50 miles.")
             return
         
-        # Get Railway URL with correct priority
-        railway_url = os.getenv('RAILWAY_STATIC_URL')  # This has the correct URL
-        if not railway_url:
-            railway_url = os.getenv('RAILWAY_URL') or os.getenv('PORT') or 'https://web-production-f0220.up.railway.app'
-        
-        # Ensure URL has https:// prefix
-        if railway_url and not railway_url.startswith('http'):
-            railway_url = f"https://{railway_url}"
-        
-        # If still no URL, try to construct from Railway's environment
-        if not railway_url or 'your-app' in railway_url:
-            railway_project_name = os.getenv('RAILWAY_PROJECT_NAME', 'web-production')
-            railway_service_name = os.getenv('RAILWAY_SERVICE_NAME', 'f0220')
-            railway_url = f"https://{railway_project_name}-{railway_service_name}.up.railway.app"
+        # Get Railway URL using the new function
+        railway_url = get_railway_url()
         
         # Generate search URL
         search_url = f"{railway_url}?user={interaction.user.id}&channel={interaction.channel.id}&category={category or ''}&radius={radius}"
@@ -2362,167 +2357,30 @@ def enhanced_index():
 @app.route('/api/search-stores', methods=['POST'])
 @limiter.limit("20 per minute")
 def api_search_stores_enhanced():
-    """Enhanced API endpoint for searching nearby stores with validation"""
+    """Enhanced API endpoint for searching nearby stores"""
     try:
         data = request.get_json()
         if not data:
             return jsonify({"error": "No JSON data provided"}), 400
         
-        # Validate required fields
-        required_fields = ['latitude', 'longitude', 'user_id']
-        for field in required_fields:
-            if field not in data:
-                return jsonify({"error": f"Missing required field: {field}"}), 400
-        
-        # Validate and parse coordinates
-        try:
-            lat = float(data['latitude'])
-            lng = float(data['longitude'])
-        except (ValueError, TypeError):
-            return jsonify({"error": "Invalid coordinates provided"}), 400
-        
-        # Validate coordinate ranges (allow any valid coordinates)
-        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
-            return jsonify({"error": "Coordinates outside valid range"}), 400
-        
-        # Get radius (optional, default to 5)
+        # Validate coordinates
+        lat = float(data['latitude'])
+        lng = float(data['longitude'])
         radius = data.get('radius', 5)
-        try:
-            radius = int(radius)
-            if not (1 <= radius <= 50):
-                radius = 5  # Default to 5 if invalid
-        except (ValueError, TypeError):
-            radius = 5  # Default to 5 if invalid
         
-        # Use the actual search function instead of test stores
-        safe_print("🔍 Using real store search function")
+        safe_print(f"🔍 API search request: lat={lat}, lng={lng}, radius={radius}")
         
-        # Check if Google Maps is available
-        if not gmaps:
-            safe_print("❌ Google Maps API not available, returning fallback stores")
-            # Return fallback stores if Google Maps is not available
-            fallback_stores = [
-                {
-                    "name": "Target",
-                    "address": "471 Salem St, Medford, MA 02155, USA",
-                    "lat": 42.4184,
-                    "lng": -71.1062,
-                    "distance": 0.1,
-                    "chain": "Target",
-                    "category": "Department",
-                    "icon": "🎯",
-                    "phone": "(781) 658-3365",
-                    "rating": 4.5,
-                    "user_ratings_total": 100,
-                    "place_id": "target_fallback",
-                    "quality_score": 0.9,
-                    "priority": 1
-                },
-                {
-                    "name": "BJ's Wholesale Club",
-                    "address": "278 Middlesex Ave, Medford, MA 02155, USA",
-                    "lat": 42.413148,
-                    "lng": -71.082149,
-                    "distance": 1.3,
-                    "chain": "BJ's Wholesale Club",
-                    "category": "Wholesale",
-                    "icon": "🛒",
-                    "phone": "(781) 396-0235",
-                    "rating": 4.0,
-                    "user_ratings_total": 478,
-                    "place_id": "bjs_fallback",
-                    "quality_score": 0.8,
-                    "priority": 2
-                },
-                {
-                    "name": "Best Buy",
-                    "address": "162 Santilli Hwy, Everett, MA 02149, USA",
-                    "lat": 42.403403,
-                    "lng": -71.06815,
-                    "distance": 2.2,
-                    "chain": "Best Buy",
-                    "category": "Electronics",
-                    "icon": "🔌",
-                    "phone": "(617) 394-5080",
-                    "rating": 4.1,
-                    "user_ratings_total": 3337,
-                    "place_id": "bestbuy_fallback",
-                    "quality_score": 0.85,
-                    "priority": 3
-                }
-            ]
-            return jsonify({
-                "status": "success",
-                "stores": fallback_stores,
-                "total_found": len(fallback_stores),
-                "search_location": {"lat": lat, "lng": lng, "radius": radius},
-                "search_timestamp": datetime.now(timezone.utc).isoformat()
-            }), 200
+        # Use the real search function
+        stores = search_nearby_stores_enhanced(lat, lng, radius * 1609.34, None, 3)
+        safe_print(f"🔍 Search returned {len(stores)} stores")
         
-        # Perform the actual search
-        try:
-            safe_print(f"🔍 Starting real search with radius {radius} miles")
-            stores = search_nearby_stores_enhanced(lat, lng, radius * 1609.34, None, 3)
-            safe_print(f"🔍 Real search completed: found {len(stores)} stores")
-            
-            # If no stores found, add fallback stores
-            if not stores:
-                safe_print("⚠️ No stores found from real search, adding fallback stores")
-                stores = [
-                    {
-                        "name": "Target",
-                        "address": "471 Salem St, Medford, MA 02155, USA",
-                        "lat": 42.4184,
-                        "lng": -71.1062,
-                        "distance": 0.1,
-                        "chain": "Target",
-                        "category": "Department",
-                        "icon": "🎯",
-                        "phone": "(781) 658-3365",
-                        "rating": 4.5,
-                        "user_ratings_total": 100,
-                        "place_id": "target_fallback",
-                        "quality_score": 0.9,
-                        "priority": 1
-                    }
-                ]
-            
-            return jsonify({
-                "status": "success",
-                "stores": stores,
-                "total_found": len(stores),
-                "search_location": {"lat": lat, "lng": lng, "radius": radius},
-                "search_timestamp": datetime.now(timezone.utc).isoformat()
-            }), 200
-            
-        except Exception as search_error:
-            safe_print(f"❌ Real search failed: {search_error}, using fallback stores")
-            # Return fallback stores if search fails
-            fallback_stores = [
-                {
-                    "name": "Target",
-                    "address": "471 Salem St, Medford, MA 02155, USA",
-                    "lat": 42.4184,
-                    "lng": -71.1062,
-                    "distance": 0.1,
-                    "chain": "Target",
-                    "category": "Department",
-                    "icon": "🎯",
-                    "phone": "(781) 658-3365",
-                    "rating": 4.5,
-                    "user_ratings_total": 100,
-                    "place_id": "target_error_fallback",
-                    "quality_score": 0.9,
-                    "priority": 1
-                }
-            ]
-            return jsonify({
-                "status": "success",
-                "stores": fallback_stores,
-                "total_found": len(fallback_stores),
-                "search_location": {"lat": lat, "lng": lng, "radius": radius},
-                "search_timestamp": datetime.now(timezone.utc).isoformat()
-            }), 200
+        return jsonify({
+            "status": "success",
+            "stores": stores,
+            "total_found": len(stores),
+            "search_location": {"lat": lat, "lng": lng, "radius": radius},
+            "search_timestamp": datetime.now(timezone.utc).isoformat()
+        }), 200
         
     except Exception as e:
         error_id = handle_error(e, "API search stores")
