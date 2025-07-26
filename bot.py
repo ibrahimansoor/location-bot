@@ -55,6 +55,11 @@ gmaps = None
 DATABASE_PATH = 'enhanced_location_bot.db'
 CACHE_ENABLED = os.getenv('REDIS_URL') is not None
 
+# Flask Configuration
+FLASK_HOST = '0.0.0.0'
+FLASK_PORT = int(os.getenv('PORT', 8080))
+FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+
 # Enhanced logging setup
 def setup_enhanced_logging():
     """Setup comprehensive logging system"""
