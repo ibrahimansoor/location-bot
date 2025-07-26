@@ -3057,6 +3057,10 @@ def run_enhanced_flask():
         # Fallback to development server if waitress not available
         safe_print("🌐 Starting enhanced Flask server (development mode)...")
         app.run(host=FLASK_HOST, port=FLASK_PORT, debug=FLASK_DEBUG, threaded=True)
+    except Exception as e:
+        # Fallback to basic Flask server if Waitress fails
+        safe_print(f"⚠️ Waitress failed, using Flask development server: {e}")
+        app.run(host=FLASK_HOST, port=FLASK_PORT, debug=False, threaded=True)
 
 def main():
     """Simplified main function for Railway deployment"""
