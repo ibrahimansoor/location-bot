@@ -2332,7 +2332,16 @@ def api_search_stores_enhanced():
         if not (-90 <= lat <= 90 and -180 <= lng <= 180):
             return jsonify({"error": "Coordinates outside valid range"}), 400
         
-        # For now, return test stores for any valid coordinates to ensure the bot works
+        # Get radius (optional, default to 5)
+        radius = data.get('radius', 5)
+        try:
+            radius = int(radius)
+            if not (1 <= radius <= 50):
+                radius = 5  # Default to 5 if invalid
+        except (ValueError, TypeError):
+            radius = 5  # Default to 5 if invalid
+        
+        # Return test stores for any valid coordinates
         safe_print("🎯 Returning test stores for all valid coordinates")
         test_stores = [
             {
