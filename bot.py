@@ -1110,7 +1110,15 @@ def get_railway_url():
         safe_print(f"🔗 Constructed Railway URL: {constructed_url}")
         return constructed_url
     
-    # Last resort fallback
+    # Try to get from Railway's default environment
+    railway_project_name = os.getenv('RAILWAY_PROJECT_NAME', '')
+    railway_service_name = os.getenv('RAILWAY_SERVICE_NAME', '')
+    if railway_project_name and railway_service_name:
+        default_url = f"https://{railway_project_name}-{railway_service_name}.up.railway.app"
+        safe_print(f"🔗 Using Railway default URL: {default_url}")
+        return default_url
+    
+    # Last resort fallback - use the working URL
     fallback_url = 'https://web-production-f0220.up.railway.app'
     safe_print(f"🔗 Using fallback Railway URL: {fallback_url}")
     return fallback_url
@@ -1248,6 +1256,17 @@ async def location_command(interaction: discord.Interaction):
         # Get Railway URL using the new function
         railway_url = get_railway_url()
         
+        # Test if the URL is accessible (simple check)
+        try:
+            import requests
+            response = requests.head(railway_url, timeout=5)
+            if response.status_code != 200:
+                safe_print(f"⚠️ Railway URL returned status {response.status_code}, using fallback")
+                railway_url = 'https://web-production-f0220.up.railway.app'
+        except Exception as url_error:
+            safe_print(f"⚠️ Railway URL test failed: {url_error}, using fallback")
+            railway_url = 'https://web-production-f0220.up.railway.app'
+        
         # Generate session ID and URL
         session_id = str(uuid.uuid4())
         website_url = f"{railway_url}?session={session_id}&user={interaction.user.id}&channel={interaction.channel.id}"
@@ -1309,9 +1328,13 @@ async def location_command(interaction: discord.Interaction):
             url=website_url
         ))
         
-        # Try to respond to interaction first
+        # Try to respond to interaction first (with shorter timeout)
         try:
-            await interaction.response.send_message(embed=embed, view=view)
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=False)
+        except discord.errors.InteractionResponded:
+            # Interaction already responded to
+            safe_print("⚠️ Interaction already responded to")
+            await channel.send(f"{user.mention}", embed=embed, view=view)
         except Exception as interaction_error:
             # If interaction fails, send as regular channel message
             safe_print(f"⚠️ Interaction failed, sending channel message: {interaction_error}")
