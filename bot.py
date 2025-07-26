@@ -2761,7 +2761,7 @@ def simplified_location_webhook():
                 # Delete the initial location message
                 if bot.loop and not bot.loop.is_closed():
                     delete_future = asyncio.run_coroutine_threadsafe(
-                        delete_initial_location_message(user_id, channel_id),
+                        delete_initial_location_message(user_id, data.get('channel_id')),
                         bot.loop
                     )
                     try:

@@ -600,9 +600,15 @@
                                 <h3>Check-in Complete!</h3>
                                 <p>Successfully checked in to ${store.name}</p>
                                 <p>Your check-in has been posted to Discord.</p>
+                                <p style="margin-top: 20px; font-size: 14px; color: #666;">This window will close automatically in 3 seconds...</p>
                             </div>
                         `;
                     }
+                    
+                    // Close the window after 3 seconds
+                    setTimeout(() => {
+                        window.close();
+                    }, 3000);
                 } else {
                     showStatus(`❌ Failed to check in: ${responseData.error || 'Unknown error'}`, 'error');
                 }
