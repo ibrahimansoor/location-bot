@@ -916,6 +916,18 @@ def cleanup_old_sessions():
         
         if keys_to_remove:
             safe_print(f"🧹 Cleaned up {len(keys_to_remove)} old sessions")
+            
+        # Also clean up stale locks (older than 5 minutes)
+        lock_keys_to_remove = []
+        for user_key in USER_LOCKS.keys():
+            # If user has a lock but no session, remove the lock
+            if user_key not in LOCATION_USER_INFO:
+                lock_keys_to_remove.append(user_key)
+        
+        for key in lock_keys_to_remove:
+            del USER_LOCKS[key]
+            safe_print(f"🔓 Cleaned up stale lock: {key}")
+            
     except Exception as e:
         safe_print(f"❌ Error in cleanup_old_sessions: {e}")
 
@@ -1020,6 +1032,7 @@ task_manager = TaskManager()
 LOCATION_CHANNEL_ID = None
 LOCATION_USER_INFO = {}
 ACTIVE_SESSIONS = {}
+USER_LOCKS = {}  # Prevent duplicate embeds per user
 bot_ready = False
 bot_connected = False
 
@@ -1308,11 +1321,12 @@ async def ping_command(interaction: discord.Interaction):
 @bot.tree.command(name="location", description="Start simple location sharing")
 async def location_command(interaction: discord.Interaction):
     """Simple location sharing for store check-ins"""
-    global LOCATION_CHANNEL_ID, LOCATION_USER_INFO
+    global LOCATION_CHANNEL_ID, LOCATION_USER_INFO, USER_LOCKS
     
     # Store interaction details for fallback
     channel = interaction.channel
     user = interaction.user
+    user_key = f"{interaction.channel.id}_{interaction.user.id}"
     
     # IMMEDIATE RESPONSE - Defer first to prevent timeout
     try:
@@ -1320,9 +1334,22 @@ async def location_command(interaction: discord.Interaction):
     except:
         pass  # Continue if already deferred
     
+    # Use lock to prevent duplicate embeds
+    if user_key in USER_LOCKS:
+        try:
+            await interaction.followup.send(
+                "⏳ Please wait, your location session is being set up...",
+                ephemeral=True
+            )
+        except:
+            await channel.send(f"{user.mention} ⏳ Please wait, your location session is being set up...")
+        return
+    
+    # Set lock to prevent duplicates
+    USER_LOCKS[user_key] = True
+    
     try:
-        # Check if user already has an active session BEFORE creating a new one
-        user_key = f"{interaction.channel.id}_{interaction.user.id}"
+        # Check if user already has an active session
         if user_key in LOCATION_USER_INFO:
             existing_session = LOCATION_USER_INFO[user_key]
             session_age = (discord.utils.utcnow() - existing_session['timestamp']).total_seconds()
@@ -1338,10 +1365,10 @@ async def location_command(interaction: discord.Interaction):
                     await channel.send(f"{user.mention} ⏳ You already have an active location session. Please wait a moment or use the existing link.")
                 return
         
-        # Generate session ID first
+        # Generate session ID
         session_id = str(uuid.uuid4())
         
-        # Create embed with placeholder URL (will be updated)
+        # Create embed with placeholder URL
         embed = discord.Embed(
             title="📍 Location Sharing",
             description=f"**{interaction.user.display_name}** wants to share their location",
@@ -1363,13 +1390,13 @@ async def location_command(interaction: discord.Interaction):
         embed.set_footer(text="Location Bot • Simple store check-ins")
         embed.timestamp = discord.utils.utcnow()
         
-        # Send initial message immediately
+        # Send initial message
         try:
             message = await interaction.followup.send(embed=embed)
         except:
             message = await channel.send(f"{user.mention}", embed=embed)
         
-        # Store user info AFTER sending message to avoid race conditions
+        # Store user info
         LOCATION_CHANNEL_ID = interaction.channel.id
         LOCATION_USER_INFO[user_key] = {
             'user_id': interaction.user.id,
@@ -1381,14 +1408,9 @@ async def location_command(interaction: discord.Interaction):
             'initial_message_id': message.id
         }
         
-        # NOW do the heavy work in background
+        # Background setup
         async def background_setup():
             try:
-                # Double-check that we still have the session (prevent race conditions)
-                if user_key not in LOCATION_USER_INFO:
-                    safe_print(f"⚠️ Session {user_key} no longer exists, skipping background setup")
-                    return
-                
                 # Check permissions
                 if not check_user_permissions(interaction.user.id, 'user'):
                     await message.edit(content="❌ You don't have permission to use this command.")
@@ -1427,7 +1449,7 @@ async def location_command(interaction: discord.Interaction):
                     url=website_url
                 ))
                 
-                # Update the message (not create a new one)
+                # Update the message
                 await message.edit(embed=embed, view=view)
                 
                 safe_print(f"🔗 Using Railway URL: {railway_url}")
@@ -1451,6 +1473,10 @@ async def location_command(interaction: discord.Interaction):
                     await message.edit(content=f"❌ Error setting up location session: {str(bg_error)[:100]}")
                 except:
                     safe_print(f"❌ Could not edit message: {bg_error}")
+            finally:
+                # Release lock after background task completes
+                if user_key in USER_LOCKS:
+                    del USER_LOCKS[user_key]
         
         # Start background task
         asyncio.create_task(background_setup())
@@ -1466,6 +1492,10 @@ async def location_command(interaction: discord.Interaction):
                 await channel.send(f"{user.mention} {error_message}")
             except:
                 safe_print(f"❌ Could not send error message to user: {error_message}")
+    finally:
+        # Release lock if there was an error
+        if user_key in USER_LOCKS:
+            del USER_LOCKS[user_key]
 
 @bot.tree.command(name="search", description="Search for specific store types near you")
 async def search_command(interaction: discord.Interaction, 
