@@ -2892,11 +2892,26 @@ async def post_enhanced_location_to_discord(location_data):
         avatar_url = None
         
         if user_id:
+            # First try to get from session cache
             user_key = f"{channel_id}_{user_id}"
             if user_key in LOCATION_USER_INFO:
                 user_info = LOCATION_USER_INFO[user_key]
                 username = user_info['username']
                 avatar_url = user_info['avatar_url']
+            else:
+                # Try to get user info from Discord directly
+                try:
+                    discord_user = bot.get_user(int(user_id))
+                    if discord_user:
+                        username = discord_user.display_name
+                        avatar_url = discord_user.display_avatar.url
+                        safe_print(f"✅ Retrieved user info from Discord: {username}")
+                    else:
+                        safe_print(f"⚠️ Could not find Discord user for ID: {user_id}")
+                except Exception as user_error:
+                    safe_print(f"⚠️ Error getting Discord user info: {user_error}")
+        else:
+            safe_print("⚠️ No user_id provided in location data")
         
         # Extract only essential store information
         store_name = selected_store_data['name']
